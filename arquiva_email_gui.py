@@ -6,6 +6,7 @@ from datetime import datetime
 import tkinter as tk
 from tkinter import filedialog
 
+
 class FileArchiver:
     def __init__(self, watch_folder, archive_root, log_folder):
         self.watch_folder = watch_folder
@@ -17,43 +18,59 @@ class FileArchiver:
         if not os.path.exists(self.log_folder):
             os.makedirs(self.log_folder)
 
-        log_file = os.path.join(self.log_folder, "archive_errors.log")
-        logging.basicConfig(
-            filename=log_file,
-            level=logging.ERROR,
-            format="%(asctime)s - %(levelname)s - %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S",
-        )
+        # Create a unique log file name for each execution
+        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+        log_file = os.path.join(
+            self.log_folder, f"archive_errors_{timestamp}.log")
+
         self.logger = logging.getLogger(__name__)
+        self.logger.setLevel(logging.WARNING)
+
+        # Create a file handler
+        file_handler = logging.FileHandler(log_file)
+        file_handler.setLevel(logging.WARNING)
+
+        # Create a formatter and add it to the handler
+        # Add \n to the end of the format string
+        formatter = logging.Formatter(
+            "%(asctime)s - %(levelname)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+        file_handler.setFormatter(formatter)
+
+        # Add the handler to the logger
+        self.logger.addHandler(file_handler)
+
+        # Add a custom handler to insert blank lines
+        self.blank_line_handler = BlankLineHandler(self.logger)
 
     def process_files(self):
         if not os.path.exists(self.watch_folder):
-            self.logger.error(f"Pasta de monitoramento não encontrada: {self.watch_folder}")
+            self.logger.error(
+                f"Pasta de monitoramento não encontrada: {self.watch_folder}")
             return
-        
+
         if not os.path.exists(self.archive_root):
-            self.logger.error(f"Pasta de arquivamento não encontrada: {self.archive_root}")
+            self.logger.error(
+                f"Pasta de arquivamento não encontrada: {self.archive_root}")
             return
-        
+
         # Iterate only through files in the watch_folder, not subfolders
         for filename in os.listdir(self.watch_folder):
             file_path = os.path.join(self.watch_folder, filename)
             if os.path.isfile(file_path):
+                self.blank_line_handler.add_blank_line()
                 self.process_file(file_path)
-
-        # Remove the call to check_and_correct_subfolders, as we're not processing subfolders
-        # self.check_and_correct_subfolders(self.archive_root)
-
-    # Removed process_folder method, as it's no longer needed
+                self.blank_line_handler.add_blank_line()
 
     def process_file(self, file_path):
         try:
+            self.logger.info(f"Processando arquivo: {file_path}")
             if file_path.lower().endswith(".eml"):
                 self.process_eml_file(file_path)
             else:
                 self.process_other_file(file_path)
         except Exception as e:
-            self.logger.error(f"Erro ao processar o arquivo {file_path}: {e}")
+            self.logger.error(
+                f"Erro ao processar o arquivo {file_path}: {e}")
 
     def process_eml_file(self, eml_path):
         try:
@@ -76,21 +93,27 @@ class FileArchiver:
                 # Tenta converter a data para diferentes formatos comuns
                 date_obj = email.utils.parsedate_to_datetime(date_str)
                 if date_obj is None:
-                    date_obj = datetime.strptime(date_str, "%a, %d %b %Y %H:%M:%S %z")
+                    date_obj = datetime.strptime(
+                        date_str, "%a, %d %b %Y %H:%M:%S %z")
             except ValueError:
                 try:
-                    date_obj = datetime.strptime(date_str, "%a, %d %b %Y %H:%M:%S %Z")
+                    date_obj = datetime.strptime(
+                        date_str, "%a, %d %b %Y %H:%M:%S %Z")
                 except ValueError:
                     try:
-                        date_obj = datetime.strptime(date_str, "%d %b %Y %H:%M:%S %z")
+                        date_obj = datetime.strptime(
+                            date_str, "%d %b %Y %H:%M:%S %z")
                     except ValueError:
                         try:
-                            date_obj = datetime.strptime(date_str, "%d %b %Y %H:%M:%S %Z")
+                            date_obj = datetime.strptime(
+                                date_str, "%d %b %Y %H:%M:%S %Z")
                         except ValueError:
-                            self.logger.error(f"Não foi possível converter a data do e-mail: {date_str} no arquivo {eml_path}. Usando a data atual.")
+                            self.logger.error(
+                                f"Não foi possível converter a data do e-mail: {date_str} no arquivo {eml_path}. Usando a data atual.")
                             date_obj = datetime.now()
         else:
-            self.logger.error(f"Data não encontrada no e-mail {eml_path}. Usando a data atual.")
+            self.logger.error(
+                f"Data não encontrada no e-mail {eml_path}. Usando a data atual.")
             date_obj = datetime.now()
 
         year = date_obj.strftime("%Y")
@@ -127,21 +150,38 @@ class FileArchiver:
             timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
             new_filename = f"{os.path.splitext(filename)[0]}_{timestamp}{os.path.splitext(filename)[1]}"
             destination_path = os.path.join(archive_folder, new_filename)
-            self.logger.warning(f"Arquivo {filename} já existe em {archive_folder}. Renomeando para {new_filename}")
+            self.logger.warning(
+                f"Arquivo duplicado: {file_path}. Renomeando para {new_filename}")
 
         try:
             shutil.move(file_path, destination_path)
-            print(f"Arquivo {os.path.basename(destination_path)} arquivado em {archive_folder}")
+            print(
+                f"Arquivo {os.path.basename(destination_path)} arquivado em {archive_folder}")
         except Exception as e:
-            self.logger.error(f"Erro ao mover o arquivo {filename}: {e}")
+            self.logger.error(f"Erro ao mover o arquivo {file_path}: {e}")
 
-    # Removed check_and_correct_subfolders, is_valid_year_month_folder, is_valid_year_folder, check_and_move_folder and check_and_move_file methods, as they are no longer needed
+
+class BlankLineHandler:
+    def __init__(self, logger):
+        self.logger = logger
+        self.file_handler = None
+        for handler in self.logger.handlers:
+            if isinstance(handler, logging.FileHandler):
+                self.file_handler = handler
+                break
+
+    def add_blank_line(self):
+        if self.file_handler:
+            with open(self.file_handler.baseFilename, "a") as f:
+                f.write("\n")
+
 
 def select_folder():
     root = tk.Tk()
     root.withdraw()  # Hide the main window
     folder_selected = filedialog.askdirectory()
     return folder_selected
+
 
 def main():
     watch_folder = select_folder()

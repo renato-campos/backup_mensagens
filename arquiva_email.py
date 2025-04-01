@@ -10,19 +10,34 @@ class FileArchiver:
         self.archive_root = archive_root
         self.log_folder = log_folder
         self.setup_logger()
+        self.last_processed_type = None  # Track last processed item type
 
     def setup_logger(self):
         if not os.path.exists(self.log_folder):
             os.makedirs(self.log_folder)
 
-        log_file = os.path.join(self.log_folder, "archive_errors.log")
-        logging.basicConfig(
-            filename=log_file,
-            level=logging.ERROR,
-            format="%(asctime)s - %(levelname)s - %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S",
-        )
+        # Create a unique log file name for each execution
+        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+        log_file = os.path.join(
+            self.log_folder, f"archive_errors_{timestamp}.log")
+
         self.logger = logging.getLogger(__name__)
+        self.logger.setLevel(logging.WARNING)
+
+        # Create a file handler
+        file_handler = logging.FileHandler(log_file)
+        file_handler.setLevel(logging.WARNING)
+
+        # Create a formatter and add it to the handler
+        formatter = logging.Formatter(
+            "%(asctime)s - %(levelname)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+        file_handler.setFormatter(formatter)
+
+        # Add the handler to the logger
+        self.logger.addHandler(file_handler)
+
+        # Add a custom handler to insert blank lines
+        self.blank_line_handler = BlankLineHandler(self.logger)
 
     def process_files(self):
         if not os.path.exists(self.watch_folder):
@@ -33,10 +48,14 @@ class FileArchiver:
         for filename in os.listdir(self.watch_folder):
             file_path = os.path.join(self.watch_folder, filename)
             if os.path.isfile(file_path):
+                if self.last_processed_type is not None:
+                    self.blank_line_handler.add_blank_line()
                 self.process_file(file_path)
+                self.last_processed_type = "file"
 
     def process_file(self, file_path):
         try:
+            self.logger.info(f"Processando arquivo: {file_path}")
             if file_path.lower().endswith(".eml"):
                 self.process_eml_file(file_path)
             else:
@@ -116,13 +135,27 @@ class FileArchiver:
             timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
             new_filename = f"{os.path.splitext(filename)[0]}_{timestamp}{os.path.splitext(filename)[1]}"
             destination_path = os.path.join(archive_folder, new_filename)
-            self.logger.warning(f"Arquivo {filename} já existe em {archive_folder}. Renomeando para {new_filename}")
+            self.logger.warning(f"Arquivo duplicado: {file_path}. Renomeando para {new_filename}")
 
         try:
             shutil.move(file_path, destination_path)
             print(f"Arquivo {os.path.basename(destination_path)} arquivado em {archive_folder}")
         except Exception as e:
-            self.logger.error(f"Erro ao mover o arquivo {filename}: {e}")
+            self.logger.error(f"Erro ao mover o arquivo {file_path}: {e}")
+
+class BlankLineHandler:
+    def __init__(self, logger):
+        self.logger = logger
+        self.file_handler = None
+        for handler in self.logger.handlers:
+            if isinstance(handler, logging.FileHandler):
+                self.file_handler = handler
+                break
+
+    def add_blank_line(self):
+        if self.file_handler:
+            with open(self.file_handler.baseFilename, "a") as f:
+                f.write("\n")
 
 def main():
     watch_folder = r"C:\Users\renat\OneDrive\Área de Trabalho\MENSAGENS"  # Pasta a ser processada
