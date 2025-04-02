@@ -13,6 +13,7 @@ class FileArchiver:
         self.archive_root = archive_root
         self.log_folder = log_folder
         self.setup_logger()
+        self.last_processed_type = None  # Track last processed item type
 
     def setup_logger(self):
         if not os.path.exists(self.log_folder):
@@ -31,7 +32,6 @@ class FileArchiver:
         file_handler.setLevel(logging.WARNING)
 
         # Create a formatter and add it to the handler
-        # Add \n to the end of the format string
         formatter = logging.Formatter(
             "%(asctime)s - %(levelname)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
         file_handler.setFormatter(formatter)
@@ -45,32 +45,32 @@ class FileArchiver:
     def process_files(self):
         if not os.path.exists(self.watch_folder):
             self.logger.error(
-                f"Pasta de monitoramento não encontrada: {self.watch_folder}")
-            return
-
-        if not os.path.exists(self.archive_root):
-            self.logger.error(
-                f"Pasta de arquivamento não encontrada: {self.archive_root}")
+                f"\nPasta de monitoramento não encontrada: {self.watch_folder}")
             return
 
         # Iterate only through files in the watch_folder, not subfolders
         for filename in os.listdir(self.watch_folder):
             file_path = os.path.join(self.watch_folder, filename)
             if os.path.isfile(file_path):
-                self.blank_line_handler.add_blank_line()
+                if file_path.lower().endswith(".ffs_db"):
+                    self.logger.info(
+                        f"\nArquivo ignorado: {file_path} (extensão .ffs_db)")
+                    continue  # Skip .ffs_db files
+                if self.last_processed_type is not None:
+                    self.blank_line_handler.add_blank_line()
                 self.process_file(file_path)
-                self.blank_line_handler.add_blank_line()
+                self.last_processed_type = "file"
 
     def process_file(self, file_path):
         try:
-            self.logger.info(f"Processando arquivo: {file_path}")
+            self.logger.info(f"\nProcessando arquivo: {file_path}")
             if file_path.lower().endswith(".eml"):
                 self.process_eml_file(file_path)
             else:
                 self.process_other_file(file_path)
         except Exception as e:
             self.logger.error(
-                f"Erro ao processar o arquivo {file_path}: {e}")
+                f"\nErro ao processar o arquivo {file_path}: {e}")
 
     def process_eml_file(self, eml_path):
         try:
@@ -81,10 +81,10 @@ class FileArchiver:
                 with open(eml_path, 'r', encoding='latin-1') as f:
                     msg = email.message_from_file(f)
             except Exception as e:
-                self.logger.error(f"Erro ao ler o arquivo {eml_path}: {e}")
+                self.logger.error(f"\nErro ao ler o arquivo {eml_path}: {e}")
                 return
         except Exception as e:
-            self.logger.error(f"Erro ao ler o arquivo {eml_path}: {e}")
+            self.logger.error(f"\nErro ao ler o arquivo {eml_path}: {e}")
             return
 
         date_str = msg.get("Date")
@@ -109,11 +109,11 @@ class FileArchiver:
                                 date_str, "%d %b %Y %H:%M:%S %Z")
                         except ValueError:
                             self.logger.error(
-                                f"Não foi possível converter a data do e-mail: {date_str} no arquivo {eml_path}. Usando a data atual.")
+                                f"\nNão foi possível converter a data do e-mail: {date_str} no arquivo {eml_path}. Usando a data atual.")
                             date_obj = datetime.now()
         else:
             self.logger.error(
-                f"Data não encontrada no e-mail {eml_path}. Usando a data atual.")
+                f"\nData não encontrada no e-mail {eml_path}. Usando a data atual.")
             date_obj = datetime.now()
 
         year = date_obj.strftime("%Y")
@@ -151,14 +151,16 @@ class FileArchiver:
             new_filename = f"{os.path.splitext(filename)[0]}_{timestamp}{os.path.splitext(filename)[1]}"
             destination_path = os.path.join(archive_folder, new_filename)
             self.logger.warning(
-                f"Arquivo duplicado: {file_path}. Renomeando para {new_filename}")
+                f"\nArquivo duplicado: {file_path}.\nRenomeando para {new_filename}")
 
         try:
             shutil.move(file_path, destination_path)
+            self.logger.info(
+                f"Arquivo movido:\nOrigem: {file_path},\nDestino: {destination_path}")
             print(
                 f"Arquivo {os.path.basename(destination_path)} arquivado em {archive_folder}")
         except Exception as e:
-            self.logger.error(f"Erro ao mover o arquivo {file_path}: {e}")
+            self.logger.error(f"\nErro ao mover o arquivo {file_path}: {e}")
 
 
 class BlankLineHandler:

@@ -41,13 +41,16 @@ class FileArchiver:
 
     def process_files(self):
         if not os.path.exists(self.watch_folder):
-            self.logger.error(f"Pasta de monitoramento não encontrada: {self.watch_folder}")
+            self.logger.error(f"\nPasta de monitoramento não encontrada: {self.watch_folder}")
             return
 
         # Iterate only through files in the watch_folder, not subfolders
         for filename in os.listdir(self.watch_folder):
             file_path = os.path.join(self.watch_folder, filename)
             if os.path.isfile(file_path):
+                if file_path.lower().endswith(".ffs_db"):
+                    self.logger.info(f"\nArquivo ignorado: {file_path} (extensão .ffs_db)")
+                    continue  # Skip .ffs_db files
                 if self.last_processed_type is not None:
                     self.blank_line_handler.add_blank_line()
                 self.process_file(file_path)
@@ -55,13 +58,13 @@ class FileArchiver:
 
     def process_file(self, file_path):
         try:
-            self.logger.info(f"Processando arquivo: {file_path}")
+            self.logger.info(f"\nProcessando arquivo: {file_path}")
             if file_path.lower().endswith(".eml"):
                 self.process_eml_file(file_path)
             else:
                 self.process_other_file(file_path)
         except Exception as e:
-            self.logger.error(f"Erro ao processar o arquivo {file_path}: {e}")
+            self.logger.error(f"\nErro ao processar o arquivo {file_path}: {e}")
 
     def process_eml_file(self, eml_path):
         try:
@@ -72,10 +75,10 @@ class FileArchiver:
                 with open(eml_path, 'r', encoding='latin-1') as f:
                     msg = email.message_from_file(f)
             except Exception as e:
-                self.logger.error(f"Erro ao ler o arquivo {eml_path}: {e}")
+                self.logger.error(f"\nErro ao ler o arquivo {eml_path}: {e}")
                 return
         except Exception as e:
-            self.logger.error(f"Erro ao ler o arquivo {eml_path}: {e}")
+            self.logger.error(f"\nErro ao ler o arquivo {eml_path}: {e}")
             return
 
         date_str = msg.get("Date")
@@ -95,10 +98,10 @@ class FileArchiver:
                         try:
                             date_obj = datetime.strptime(date_str, "%d %b %Y %H:%M:%S %Z")
                         except ValueError:
-                            self.logger.error(f"Não foi possível converter a data do e-mail: {date_str} no arquivo {eml_path}. Usando a data atual.")
+                            self.logger.error(f"\nNão foi possível converter a data do e-mail: {date_str} no arquivo {eml_path}. Usando a data atual.")
                             date_obj = datetime.now()
         else:
-            self.logger.error(f"Data não encontrada no e-mail {eml_path}. Usando a data atual.")
+            self.logger.error(f"\nData não encontrada no e-mail {eml_path}. Usando a data atual.")
             date_obj = datetime.now()
 
         year = date_obj.strftime("%Y")
@@ -135,13 +138,14 @@ class FileArchiver:
             timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
             new_filename = f"{os.path.splitext(filename)[0]}_{timestamp}{os.path.splitext(filename)[1]}"
             destination_path = os.path.join(archive_folder, new_filename)
-            self.logger.warning(f"Arquivo duplicado: {file_path}. Renomeando para {new_filename}")
+            self.logger.warning(f"\nArquivo duplicado: {file_path}.\nRenomeando para {new_filename}")
 
         try:
             shutil.move(file_path, destination_path)
+            self.logger.info(f"\nArquivo movido: Origem: {file_path},\nDestino: {destination_path}")
             print(f"Arquivo {os.path.basename(destination_path)} arquivado em {archive_folder}")
         except Exception as e:
-            self.logger.error(f"Erro ao mover o arquivo {file_path}: {e}")
+            self.logger.error(f"\nErro ao mover o arquivo {file_path}: {e}")
 
 class BlankLineHandler:
     def __init__(self, logger):
@@ -158,7 +162,7 @@ class BlankLineHandler:
                 f.write("\n")
 
 def main():
-    watch_folder = r"C:\Users\renat\OneDrive\Área de Trabalho\MENSAGENS"  # Pasta a ser processada
+    watch_folder = r"D:\Backup mensagens"  # Pasta a ser processada
     archive_root = watch_folder  # Pasta raiz para arquivamento
     log_folder = os.path.join(archive_root, "ERROS")  # Pasta para logs de erro
 
