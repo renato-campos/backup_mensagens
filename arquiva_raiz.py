@@ -22,67 +22,7 @@ class FileMover:
         # Pastas a serem ignoradas durante o processamento
         self.excluded_folders = ["erros", "anos anteriores"]
 
-    def setup_logger(self):
-        """Configura o logger para registrar eventos importantes."""
-        if not os.path.exists(self.log_folder):
-            os.makedirs(self.log_folder, exist_ok=True)
-
-        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-        # Define o nome do arquivo de log com timestamp
-        log_file = os.path.join(
-            self.log_folder, f"process_root_log_{timestamp}.log")
-
-        self.logger = logging.getLogger(__name__)
-        if not self.logger.hasHandlers():
-            # Configura o nível mínimo de log a ser capturado (INFO pega sanitização, WARNING pega truncamento/duplicados, ERROR pega falhas)
-            self.logger.setLevel(logging.INFO)
-            file_handler = logging.FileHandler(log_file, encoding='utf-8')
-            # Handler processa logs a partir deste nível
-            file_handler.setLevel(logging.INFO)
-            formatter = logging.Formatter(
-                "%(asctime)s - %(levelname)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
-            file_handler.setFormatter(formatter)
-            self.logger.addHandler(file_handler)
-
-    def _sanitize_filename(self, filename):
-        """Remove ou substitui caracteres inválidos e o prefixo 'msg '."""
-        sanitized = re.sub(r'^msg\s+', '', filename, flags=re.IGNORECASE)
-        sanitized = re.sub(r'[<>:"/\\|?*]', '_', sanitized)
-        sanitized = re.sub(r'[\x00-\x1f]', '', sanitized)
-        sanitized = sanitized.strip()
-        if not sanitized:
-            # Gera um nome único se o nome ficar vazio após a limpeza
-            sanitized = f"arquivo_renomeado_{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
-        return sanitized
-
-    def _truncate_filename(self, folder_path, filename, max_len):
-        """Trunca o nome do arquivo se o caminho completo exceder max_len."""
-        base, ext = os.path.splitext(filename)
-        full_path = os.path.join(folder_path, filename)
-        full_path_len = len(full_path)
-
-        if full_path_len <= max_len:
-            return filename  # Não precisa truncar
-
-        # Calcula o espaço disponível para a base do nome do arquivo
-        available_len_for_base = max_len - \
-            (len(folder_path) + len(os.sep) + len(ext))
-
-        if available_len_for_base <= 0:
-            # Loga erro se não for possível truncar (caminho da pasta já é muito longo)
-            self.logger.error(
-                f"Não é possível criar um nome de arquivo válido para '{filename}' na pasta '{folder_path}' devido ao limite de comprimento ({max_len}). O caminho da pasta é muito longo.")
-            return filename  # Retorna original, o erro ocorrerá no move/rename
-
-        # Guarda o nome original para registrar no log de aviso
-        original_filename_for_log = filename
-        truncated_base = base[:available_len_for_base]
-        truncated_filename = f"{truncated_base}{ext}"
-        # Loga um aviso informando que o nome foi truncado
-        self.logger.warning(
-            f"Nome do arquivo truncado devido ao limite de comprimento do caminho: '{original_filename_for_log}' -> '{truncated_filename}' em '{folder_path}'")
-        return truncated_filename
-
+    # Métodos públicos (API da classe)
     def process_files_in_root(self):
         """Processa arquivos: move de subpastas para a raiz e renomeia (sanitiza/trunca) arquivos na raiz e os movidos."""
         if not os.path.exists(self.root_folder):
@@ -275,6 +215,70 @@ class FileMover:
             print(
                 f"Atenção: Ocorreram {error_remove_count} erros durante a remoção de pastas vazias. Verifique o log.")
 
+    # Métodos privados auxiliares
+    def setup_logger(self):
+        """Configura o logger para registrar eventos importantes."""
+        if not os.path.exists(self.log_folder):
+            os.makedirs(self.log_folder, exist_ok=True)
+
+        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+        # Define o nome do arquivo de log com timestamp
+        log_file = os.path.join(
+            self.log_folder, f"process_root_log_{timestamp}.log")
+
+        self.logger = logging.getLogger(__name__)
+        if not self.logger.hasHandlers():
+            # Configura o nível mínimo de log a ser capturado (INFO pega sanitização, WARNING pega truncamento/duplicados, ERROR pega falhas)
+            self.logger.setLevel(logging.INFO)
+            file_handler = logging.FileHandler(log_file, encoding='utf-8')
+            # Handler processa logs a partir deste nível
+            file_handler.setLevel(logging.INFO)
+            formatter = logging.Formatter(
+                "%(asctime)s - %(levelname)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+            file_handler.setFormatter(formatter)
+            self.logger.addHandler(file_handler)
+
+    def _sanitize_filename(self, filename):
+        """Remove ou substitui caracteres inválidos e o prefixo 'msg '."""
+        sanitized = re.sub(r'^msg\s+', '', filename, flags=re.IGNORECASE)
+        sanitized = re.sub(r'[<>:"/\\|?*]', '_', sanitized)
+        sanitized = re.sub(r'[\x00-\x1f]', '', sanitized)
+        sanitized = sanitized.strip()
+        if not sanitized:
+            # Gera um nome único se o nome ficar vazio após a limpeza
+            sanitized = f"arquivo_renomeado_{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
+        return sanitized
+
+    def _truncate_filename(self, folder_path, filename, max_len):
+        """Trunca o nome do arquivo se o caminho completo exceder max_len."""
+        base, ext = os.path.splitext(filename)
+        full_path = os.path.join(folder_path, filename)
+        full_path_len = len(full_path)
+
+        if full_path_len <= max_len:
+            return filename  # Não precisa truncar
+
+        # Calcula o espaço disponível para a base do nome do arquivo
+        available_len_for_base = max_len - \
+            (len(folder_path) + len(os.sep) + len(ext))
+
+        if available_len_for_base <= 0:
+            # Loga erro se não for possível truncar (caminho da pasta já é muito longo)
+            self.logger.error(
+                f"Não é possível criar um nome de arquivo válido para '{filename}' na pasta '{folder_path}' devido ao limite de comprimento ({max_len}). O caminho da pasta é muito longo.")
+            return filename  # Retorna original, o erro ocorrerá no move/rename
+
+        # Guarda o nome original para registrar no log de aviso
+        original_filename_for_log = filename
+        truncated_base = base[:available_len_for_base]
+        truncated_filename = f"{truncated_base}{ext}"
+        # Loga um aviso informando que o nome foi truncado
+        self.logger.warning(
+            f"Nome do arquivo truncado devido ao limite de comprimento do caminho: '{original_filename_for_log}' -> '{truncated_filename}' em '{folder_path}'")
+        return truncated_filename
+
+
+    
 
 def select_folder():
     """Abre uma janela para o usuário selecionar uma pasta."""

@@ -8,10 +8,12 @@ from datetime import datetime
 # Definir um comprimento máximo seguro para o caminho completo
 MAX_PATH_LENGTH = 255
 SAFE_FILENAME_MARGIN = 10 # Margem para evitar problemas exatos no limite
+# Definir a pasta de monitoramento e a pasta de arquivamento
+WATCH_FOLDER = r"D:\emails"   # Ajuste conforme necessário
 
 class FileArchiver:
-    def __init__(self, watch_folder, archive_root, log_folder):
-        self.watch_folder = watch_folder
+    def __init__(self, WATCH_FOLDER, archive_root, log_folder):
+        self.watch_folder = WATCH_FOLDER
         self.archive_root = archive_root
         self.log_folder = log_folder
         self.setup_logger()
@@ -66,7 +68,7 @@ class FileArchiver:
             print(f"ERRO: Pasta de monitoramento não encontrada: {self.watch_folder}")
             return
 
-        # Itera apenas pelos arquivos na pasta watch_folder
+        # Itera apenas pelos arquivos na pasta WATCH_FOLDER
         for filename in os.listdir(self.watch_folder):
             file_path = os.path.join(self.watch_folder, filename)
             if os.path.isfile(file_path):
@@ -300,36 +302,35 @@ class FileArchiver:
 
 def main():
     # Mantenha ou ajuste as pastas conforme necessário
-    watch_folder = r"C:\Users\renat\OneDrive\Área de Trabalho\Nova pasta"
-    archive_root = watch_folder
+    archive_root = WATCH_FOLDER
     log_folder = os.path.join(archive_root, "ERROS")
 
-    # Cria a pasta watch_folder se não existir (para testes)
-    if not os.path.exists(watch_folder):
+    # Cria a pasta WATCH_FOLDER se não existir (para testes)
+    if not os.path.exists(WATCH_FOLDER):
         try:
-            os.makedirs(watch_folder)
-            print(f"Pasta de monitoramento {watch_folder} criada para teste.")
+            os.makedirs(WATCH_FOLDER)
+            print(f"Pasta de monitoramento {WATCH_FOLDER} criada para teste.")
             # Crie alguns arquivos .eml ou outros para teste dentro dela
-            with open(os.path.join(watch_folder, "msg teste1.eml"), "w", encoding='utf-8') as f: # Adicionado 'msg ' para teste
+            with open(os.path.join(WATCH_FOLDER, "msg teste1.eml"), "w", encoding='utf-8') as f: # Adicionado 'msg ' para teste
                 f.write("Date: Mon, 1 Jan 2024 10:00:00 +0000\nSubject: Teste\n\nCorpo do email.")
-            with open(os.path.join(watch_folder, "MSG Arquivo com espaço.txt"), "w", encoding='utf-8') as f: # Adicionado 'MSG ' para teste
+            with open(os.path.join(WATCH_FOLDER, "MSG Arquivo com espaço.txt"), "w", encoding='utf-8') as f: # Adicionado 'MSG ' para teste
                 f.write("Conteúdo.")
             long_name = "msg " + "a" * 240 + ".txt" # Nome bem longo com prefixo
-            with open(os.path.join(watch_folder, long_name), "w", encoding='utf-8') as f:
+            with open(os.path.join(WATCH_FOLDER, long_name), "w", encoding='utf-8') as f:
                  f.write("Longo.")
-            with open(os.path.join(watch_folder, "arquivo sem prefixo.txt"), "w", encoding='utf-8') as f:
+            with open(os.path.join(WATCH_FOLDER, "arquivo sem prefixo.txt"), "w", encoding='utf-8') as f:
                  f.write("Normal.")
 
 
         except OSError as e:
-            print(f"Erro ao criar pasta de monitoramento {watch_folder}: {e}")
+            print(f"Erro ao criar pasta de monitoramento {WATCH_FOLDER}: {e}")
             # Não retorna aqui, pois o FileArchiver vai logar o erro se a pasta não existir
             # return
 
     # Não precisa criar archive_root, pois é o mesmo que watch_folder
     # if not os.path.exists(archive_root): ...
 
-    archiver = FileArchiver(watch_folder, archive_root, log_folder)
+    archiver = FileArchiver(WATCH_FOLDER, archive_root, log_folder)
     archiver.process_files()
     print("\nProcessamento concluído.")
     # Informa onde verificar os logs de falha

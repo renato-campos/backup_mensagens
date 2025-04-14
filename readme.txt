@@ -73,3 +73,5 @@ Pasta padrão do programa e que só pode ser alterada diretamente no código: "C
 * O script `arquiva_subpastas.py` e `arquiva_raiz.py` ignoram as pastas "erros" e "anos anteriores".
 * O script `arquiva_raiz.py` remove as pastas vazias.
 * O script `arvore_diff.py` compara pastas e subpastas recursivamente.
+
+
