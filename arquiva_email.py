@@ -9,7 +9,7 @@ from datetime import datetime
 MAX_PATH_LENGTH = 255
 SAFE_FILENAME_MARGIN = 10 # Margem para evitar problemas exatos no limite
 # Definir a pasta de monitoramento e a pasta de arquivamento
-WATCH_FOLDER = r"D:\emails"   # Ajuste conforme necessário
+WATCH_FOLDER = r"C:\Users\CEPOL\Documents\Arquivos do Outlook\Backup MSG"   # Ajuste conforme necessário
 
 class FileArchiver:
     def __init__(self, WATCH_FOLDER, archive_root, log_folder):

@@ -74,4 +74,8 @@ Pasta padrão do programa e que só pode ser alterada diretamente no código: "C
 * O script `arquiva_raiz.py` remove as pastas vazias.
 * O script `arvore_diff.py` compara pastas e subpastas recursivamente.
 
-
+## Gerando .Exe
+pyinstaller --noconfirm --windowed --onefile --icon="X:\Onedrive\CECOP ADM\OneDrive - MSFT\Pictures\icones\email_1.ico" arquiva_email.py
+pyinstaller --noconfirm --windowed --onefile --icon="X:\Onedrive\CECOP ADM\OneDrive - MSFT\Pictures\icones\email_2.ico" arquiva_email_gui.py
+pyinstaller --noconfirm --windowed --onefile --icon="X:\Onedrive\CECOP ADM\OneDrive - MSFT\Pictures\icones\email_3.ico" arquiva_subpastas.py
+pyinstaller --noconfirm --windowed --onefile --icon="X:\Onedrive\CECOP ADM\OneDrive - MSFT\Pictures\icones\diretorio_raiz.ico" arquiva_raiz.py
