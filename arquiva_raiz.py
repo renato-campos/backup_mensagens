@@ -4,7 +4,7 @@ import logging
 import re
 from datetime import datetime
 import tkinter as tk
-from tkinter import filedialog
+from tkinter import filedialog, messagebox
 
 # --- Constantes ---
 MAX_PATH_LENGTH = 255  # Limite máximo de caracteres para um caminho no Windows
@@ -28,7 +28,7 @@ class FileMover:
         if not os.path.exists(self.root_folder):
             self.logger.error(
                 f"Pasta raiz não encontrada: {self.root_folder}")
-            print(f"ERRO: Pasta raiz não encontrada: {self.root_folder}")
+            # print(f"ERRO: Pasta raiz não encontrada: {self.root_folder}")
             return
 
         processed_files_count = 0
@@ -105,14 +105,14 @@ class FileMover:
                             f"Arquivo duplicado ou conflito de nome em '{self.root_folder}' para '{temp_base_filename_for_duplicates}'. Renomeando para '{final_filename}' (Origem: '{source_path}')")
                         break  # Sai do loop, nome único encontrado
 
-                    counter += 1
-                    # Limite de segurança para evitar loops infinitos
-                    if counter > 5:
-                        self.logger.error(
-                            f"Loop inesperado ao tentar renomear '{temp_base_filename_for_duplicates}'. Pulando '{source_path}'.")
-                        error_count += 1
-                        final_filename = None
-                        break
+                counter += 1
+                # Limite de segurança para evitar loops infinitos
+                if counter > 5:
+                    self.logger.error(
+                        f"Loop inesperado ao tentar renomear '{temp_base_filename_for_duplicates}'. Pulando '{source_path}'.")
+                    error_count += 1
+                    final_filename = None
+                    break
 
                 # Pula para o próximo arquivo se houve erro irresolúvel na renomeação
                 if final_filename is None:
@@ -144,41 +144,40 @@ class FileMover:
                     error_count += 1
 
         # Exibe um resumo da operação para o usuário
-        print("-" * 30)
+        summary_message = "-" * 30 + "\n"
         if processed_files_count > 0:
-            print(f"Processamento concluído:")
+            summary_message += f"Processamento concluído:\n"
             if renamed_files_count > 0:
-                print(
-                    f"- {renamed_files_count} arquivos renomeados na pasta raiz.")
+                summary_message += f"- {renamed_files_count} arquivos renomeados na pasta raiz.\n"
             if moved_files_count > 0:
-                print(
-                    f"- {moved_files_count} arquivos movidos das subpastas para a raiz.")
+                summary_message += f"- {moved_files_count} arquivos movidos das subpastas para a raiz.\n"
         else:
-            print("Nenhum arquivo precisou ser movido ou renomeado.")
+            summary_message += "Nenhum arquivo precisou ser movido ou renomeado.\n"
 
         if error_count > 0:
-            print(
-                f"\nAtenção: Ocorreram {error_count} erros durante a operação. Verifique o log em '{self.log_folder}'.")
+            summary_message += f"\nAtenção: Ocorreram {error_count} erros durante a operação. Verifique o log em '{self.log_folder}'.\n"
         else:
             # Verifica se algum log foi gerado (mesmo sem erros fatais)
             log_file_exists = any(fname.startswith("process_root_log_") for fname in os.listdir(
                 self.log_folder)) if os.path.exists(self.log_folder) else False
             if log_file_exists:
-                print(
-                    f"\nOperação concluída. Logs de sanitização, truncamento ou renomeação por duplicidade podem ter sido gerados em '{self.log_folder}'.")
+                summary_message += f"\nOperação concluída. Logs de sanitização, truncamento ou renomeação por duplicidade podem ter sido gerados em '{self.log_folder}'.\n"
             else:
-                print(
-                    "\nOperação concluída sem erros ou necessidade de alterações nos nomes dos arquivos.")
+                summary_message += "\nOperação concluída sem erros ou necessidade de alterações nos nomes dos arquivos.\n"
+
+        # Armazene a mensagem para uso posterior
+        self.summary_message = summary_message
 
         # Remove pastas vazias somente se arquivos foram movidos
         if moved_files_count > 0:
-            self.remove_empty_folders()
+            empty_folders_message = self.remove_empty_folders()
+            self.summary_message += "\n" + empty_folders_message
         else:
-            print("Nenhuma pasta vazia para remover (nenhum arquivo foi movido).")
+            self.summary_message += "\nNenhuma pasta vazia para remover (nenhum arquivo foi movido)."
 
     def remove_empty_folders(self):
         """Remove pastas vazias APENAS das subpastas de onde os arquivos foram movidos."""
-        print("Verificando pastas vazias para remoção...")
+        message = "Verificando pastas vazias para remoção...\n"
         removed_count = 0
         error_remove_count = 0
         # Itera de baixo para cima (`topdown=False`) para remover subpastas antes das pastas pai
@@ -206,14 +205,14 @@ class FileMover:
                     error_remove_count += 1
 
         if removed_count > 0:
-            print(
-                f"Remoção de pastas vazias concluída. {removed_count} pastas removidas.")
+            message += f"Remoção de pastas vazias concluída. {removed_count} pastas removidas.\n"
         else:
-            print("Nenhuma pasta vazia encontrada para remover.")
+            message += "Nenhuma pasta vazia encontrada para remover.\n"
 
         if error_remove_count > 0:
-            print(
-                f"Atenção: Ocorreram {error_remove_count} erros durante a remoção de pastas vazias. Verifique o log.")
+            message += f"Atenção: Ocorreram {error_remove_count} erros durante a remoção de pastas vazias. Verifique o log.\n"
+
+        return message
 
     # Métodos privados auxiliares
     def setup_logger(self):
@@ -278,8 +277,6 @@ class FileMover:
         return truncated_filename
 
 
-    
-
 def select_folder():
     """Abre uma janela para o usuário selecionar uma pasta."""
     root = tk.Tk()
@@ -290,10 +287,16 @@ def select_folder():
 
 
 def main():
-    print("Selecionando a pasta raiz para centralizar e sanitizar os arquivos...")
+    root = tk.Tk()
+    root.withdraw()
+    messagebox.showinfo("Seleção de Pasta",
+                        "Selecionando a pasta raiz para centralizar e sanitizar os arquivos...")
+
     root_folder = select_folder()
     if not root_folder:
-        print("Nenhuma pasta selecionada. Encerrando.")
+        messagebox.showinfo("Operação Cancelada",
+                            "Nenhuma pasta selecionada. Encerrando.")
+        root.destroy()
         return
 
     # Define a pasta de logs como 'ERROS' dentro da pasta raiz selecionada
@@ -301,19 +304,98 @@ def main():
 
     if not os.path.exists(root_folder):
         # Verificação adicional caso a pasta seja removida entre a seleção e o uso
-        print(f"ERRO: A pasta selecionada {root_folder} não foi encontrada.")
+        messagebox.showerror("Erro",
+                             f"ERRO: A pasta selecionada {root_folder} não foi encontrada.")
+        root.destroy()
         return
 
-    print(f"Pasta raiz selecionada: {root_folder}")
-    print(f"Os logs de erros e alterações serão salvos em: {log_folder}")
-    print("Iniciando o processo...")
+    info_message = f"Pasta raiz selecionada: {root_folder}\n"
+    info_message += f"Os logs de erros e alterações serão salvos em: {log_folder}\n"
+    info_message += "Iniciando o processo..."
+
+    messagebox.showinfo("Processo Iniciado", info_message)
 
     mover = FileMover(root_folder, log_folder)
     mover.process_files_in_root()  # Chama o método principal da classe
 
-    print("\nProcesso concluído.")
-    print(
-        f"Verifique o arquivo de log em '{log_folder}' para detalhes sobre erros ou alterações realizadas nos nomes dos arquivos.")
+    # Verificar se existem logs para informar ao usuário
+    log_files = [f for f in os.listdir(log_folder) if f.startswith(
+        "process_root_log_") and f.endswith(".log")] if os.path.exists(log_folder) else []
+
+    final_message = mover.summary_message + "\n\n"
+    if log_files:
+        final_message += f"Verifique o arquivo de log em '{log_folder}' para detalhes sobre erros ou alterações realizadas nos nomes dos arquivos."
+    else:
+        final_message += "Nenhum erro ou alteração significativa foi registrada durante o processo."
+
+    # Substituir messagebox.showinfo por show_auto_close_message
+    root.destroy()  # Destruir a janela root antes de criar a nova
+    show_auto_close_message(final_message, 10000)  # 10 segundos
+
+
+def show_auto_close_message(message, timeout):
+    """
+    Exibe uma mensagem que se fecha automaticamente após o tempo especificado.
+
+    Args:
+        message: Texto da mensagem
+        timeout: Tempo em milissegundos antes do fechamento automático
+    """
+    # Criar janela
+    root = tk.Tk()
+    root.title("Processamento Concluído")
+
+    # Centralizar na tela
+    window_width = 500
+    window_height = 500
+    screen_width = root.winfo_screenwidth()
+    screen_height = root.winfo_screenheight()
+    x_coordinate = int((screen_width - window_width) / 2)
+    y_coordinate = int((screen_height - window_height) / 2)
+    root.geometry(
+        f"{window_width}x{window_height}+{x_coordinate}+{y_coordinate}")
+
+    # Adicionar texto
+    frame = tk.Frame(root, padx=20, pady=20)
+    frame.pack(fill=tk.BOTH, expand=True)
+
+    # Adicionar contador regressivo
+    countdown_var = tk.StringVar()
+    countdown_var.set(f"Esta mensagem se fechará em {timeout//1000} segundos")
+
+    # Título
+    title_label = tk.Label(
+        frame, text="Processamento Concluído", font=("Arial", 14, "bold"))
+    title_label.pack(pady=(0, 10))
+
+    # Mensagem principal
+    msg_label = tk.Label(frame, text=message, justify=tk.LEFT, wraplength=450)
+    msg_label.pack(pady=10)
+
+    # Contador
+    countdown_label = tk.Label(frame, textvariable=countdown_var, fg="gray")
+    countdown_label.pack(pady=(10, 0))
+
+    # Botão para fechar manualmente
+    close_button = tk.Button(frame, text="Fechar", command=root.destroy)
+    close_button.pack(pady=10)
+
+    # Função para atualizar o contador e fechar a janela
+    def update_countdown(remaining):
+        if remaining <= 0:
+            root.destroy()
+            return
+        countdown_var.set(f"Esta mensagem se fechará em {remaining} segundos")
+        root.after(1000, update_countdown, remaining - 1)
+
+    # Iniciar o contador
+    root.after(0, update_countdown, timeout // 1000)
+
+    # Iniciar o temporizador para fechar a janela
+    root.after(timeout, root.destroy)
+
+    # Iniciar loop principal
+    root.mainloop()
 
 
 if __name__ == "__main__":
