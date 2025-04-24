@@ -10,7 +10,8 @@ MAX_PATH_LENGTH = 255
 SAFE_FILENAME_MARGIN = 10  # Margem para evitar problemas exatos no limite
 # Definir a pasta de monitoramento e a pasta de arquivamento
 # Ajuste conforme necessário
-WATCH_FOLDER = r"C:\Users\CEPOL\Documents\Arquivos do Outlook\Backup MSG"
+#WATCH_FOLDER = r"C:\Users\CEPOL\Documents\Arquivos do Outlook\Backup MSG"
+WATCH_FOLDER = r"C:\Users\renat\OneDrive\Área de Trabalho\2025\2025-01"
 
 
 class FileArchiver:
@@ -213,7 +214,17 @@ class FileArchiver:
         # 4. Remove espaços em branco no início ou fim (após remover prefixo e inválidos)
         sanitized = sanitized.strip()
 
-        # 5. Garante que o nome não seja vazio após a limpeza
+        # 5. Normaliza números no início do nome para remover zeros à esquerda
+        # Procura por um número no início do nome do arquivo
+        match = re.match(r'^(\d+)(.*)', sanitized)
+        if match:
+            number_str, rest_of_name = match.groups()
+            # Converte para inteiro para remover zeros à esquerda
+            number = int(number_str)
+            # Reconstrói o nome com o número sem zeros à esquerda
+            sanitized = str(number) + rest_of_name
+
+        # 6. Garante que o nome não seja vazio após a limpeza
         if not sanitized:
             # Se o nome original era apenas "msg " ou algo similar que foi removido
             sanitized = "arquivo_renomeado"  # Ou gerar um nome único com timestamp

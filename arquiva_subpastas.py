@@ -356,18 +356,36 @@ class FileArchiver:
 
     def _sanitize_filename(self, filename):
         """Remove ou substitui caracteres inválidos e o prefixo 'msg '."""
+        # 1. Remove o prefixo "msg " (case-insensitive) do início
+        #    O padrão ^ indica o início da string
+        #    re.IGNORECASE faz a busca ignorar maiúsculas/minúsculas
+        # Adicionado \s+ para remover o espaço seguinte também
         sanitized = re.sub(r'^msg\s+', '', filename, flags=re.IGNORECASE)
-        # Replace common invalid chars with underscore
+
+        # 2. Remove caracteres inválidos: < > : " / \ | ? *
         sanitized = re.sub(r'[<>:"/\\|?*]', '_', sanitized)
-        # Remove control characters (0x00-0x1F)
+
+        # 3. Remove caracteres de controle (ASCII 0-31)
         sanitized = re.sub(r'[\x00-\x1f]', '', sanitized)
-        # Remove leading/trailing whitespace and dots
-        sanitized = sanitized.strip(' .')
-        # Replace multiple consecutive underscores with a single one
-        sanitized = re.sub(r'_+', '_', sanitized)
+
+        # 4. Remove espaços em branco no início ou fim (após remover prefixo e inválidos)
+        sanitized = sanitized.strip()
+
+        # 5. Normaliza números no início do nome para remover zeros à esquerda
+        # Procura por um número no início do nome do arquivo
+        match = re.match(r'^(\d+)(.*)', sanitized)
+        if match:
+            number_str, rest_of_name = match.groups()
+            # Converte para inteiro para remover zeros à esquerda
+            number = int(number_str)
+            # Reconstrói o nome com o número sem zeros à esquerda
+            sanitized = str(number) + rest_of_name
+
+        # 6. Garante que o nome não seja vazio após a limpeza
         if not sanitized:
-            # Generate a unique name if the name becomes empty after cleaning
-            sanitized = f"arquivo_renomeado_{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
+            # Se o nome original era apenas "msg " ou algo similar que foi removido
+            sanitized = "arquivo_renomeado"  # Ou gerar um nome único com timestamp
+        # Não loga mais a sanitização
         return sanitized
 
     # _truncate_filename (igual ao dos outros scripts, com contagem de erro)
