@@ -24,6 +24,7 @@ class FileArchiver:
 
         # --- Counters and Summary ---
         self.moved_files_count = 0
+        self.renamed_in_place_count = 0
         self.error_count = 0
         self.created_folders_count = 0
         self.summary_message = ""
@@ -98,8 +99,9 @@ class FileArchiver:
 
         # Reset counters for this run
         self.moved_files_count = 0
+        self.renamed_in_place_count = 0  # Resetar novo contador
         # Keep error_count if logger setup failed
-        # self.error_count = 0
+        # self.error_count = 0 # Não resetar erros de setup
         self.created_folders_count = 0
 
         # Inicia o processo recursivo a partir da pasta raiz/monitorada
@@ -107,26 +109,28 @@ class FileArchiver:
 
         # --- Generate Summary Message ---
         summary = "-" * 30 + "\n"
-        if self.moved_files_count > 0 or self.created_folders_count > 0:
+        actions_taken = False
+        if self.moved_files_count > 0 or self.renamed_in_place_count > 0 or self.created_folders_count > 0:
             summary += f"Processamento concluído:\n"
+            actions_taken = True
             if self.moved_files_count > 0:
-                summary += f"- {self.moved_files_count} arquivos arquivados em pastas de ano/mês.\n"
+                summary += f"- {self.moved_files_count} arquivos movidos para pastas de ano/mês corretas.\n"
+            if self.renamed_in_place_count > 0:  # Adiciona info do novo contador
+                summary += f"- {self.renamed_in_place_count} arquivos renomeados (sanitizados/truncados) no local.\n"
             if self.created_folders_count > 0:
                 summary += f"- {self.created_folders_count} novas pastas de ano/mês criadas.\n"
         else:
-            summary += "Nenhum arquivo precisou ser movido ou pasta criada.\n"
+            # Verifica se houve erros para diferenciar de "nenhuma ação necessária"
+            if self.error_count == 0:
+                summary += "Nenhum arquivo precisou ser movido ou renomeado. Organização e nomes já estavam corretos.\n"
+            else:
+                summary += "Nenhuma ação de movimentação ou renomeio foi concluída com sucesso (verifique os erros).\n"
 
         if self.error_count > 0:
             summary += f"\nAtenção: Ocorreram {self.error_count} erros durante a operação. Verifique o log em '{self.log_folder}'.\n"
-        else:
-            # Verifica se algum log foi gerado (mesmo sem erros fatais)
-            log_file_exists = any(fname.startswith("archive_failures_") for fname in os.listdir(
-                self.log_folder)) if os.path.exists(self.log_folder) else False
-            if log_file_exists:
-                # Should not happen if error_count is 0, but check anyway
-                summary += f"\nOperação concluída. Logs de erro podem ter sido gerados em '{self.log_folder}'.\n"
-            else:
-                summary += "\nOperação concluída sem erros registrados.\n"
+        elif actions_taken:  # Só mostra "sem erros" se alguma ação foi feita
+            summary += "\nOperação concluída sem erros registrados.\n"
+        # Se não houve ações E não houve erros, a mensagem de "nenhum arquivo precisou..." já foi mostrada.
 
         self.summary_message = summary
         # --- End Generate Summary Message ---
@@ -239,13 +243,13 @@ class FileArchiver:
 
         try:
             # Verifica se o arquivo JÁ ESTÁ na pasta de destino correta
-            current_folder_abs = os.path.normpath(
-                os.path.abspath(os.path.dirname(eml_path)))
-            target_folder_abs = os.path.normpath(
-                os.path.abspath(archive_folder))
+            # current_folder_abs = os.path.normpath(
+            #    os.path.abspath(os.path.dirname(eml_path)))
+            # target_folder_abs = os.path.normpath(
+            #    os.path.abspath(archive_folder))
 
-            if current_folder_abs == target_folder_abs:
-                return  # Silently ignore if already in the correct place
+            # if current_folder_abs == target_folder_abs:
+            #    return  # Silently ignore if already in the correct place
 
             # Chama move_file_to_archive
             self.move_file_to_archive(eml_path, archive_folder)
@@ -335,13 +339,13 @@ class FileArchiver:
 
         try:
             # Verifica se o arquivo JÁ ESTÁ na pasta de destino correta
-            current_folder_abs = os.path.normpath(
-                os.path.abspath(os.path.dirname(file_path)))
-            target_folder_abs = os.path.normpath(
-                os.path.abspath(archive_folder))
+            # current_folder_abs = os.path.normpath(
+            #    os.path.abspath(os.path.dirname(file_path)))
+            # target_folder_abs = os.path.normpath(
+            #    os.path.abspath(archive_folder))
 
-            if current_folder_abs == target_folder_abs:
-                return  # Silently ignore
+            # if current_folder_abs == target_folder_abs:
+            #    return  # Silently ignore
 
             # Chama move_file_to_archive
             self.move_file_to_archive(file_path, archive_folder)
@@ -440,63 +444,94 @@ class FileArchiver:
     # move_file_to_archive substituído pela versão mais robusta com contagem
 
     def move_file_to_archive(self, file_path, archive_folder):
-        """Move o arquivo para a pasta de destino, tratando sanitização, truncamento e duplicados."""
+        """
+        Move ou renomeia o arquivo para a pasta de destino, tratando sanitização,
+        truncamento e duplicados. Decide entre mover, renomear no local ou ignorar.
+        """
+        # Garante que o arquivo de origem ainda existe
+        if not os.path.exists(file_path):
+            # Não loga como erro aqui, pois pode ter sido processado em outra chamada
+            # self.logger.warning(f"{file_path} - Arquivo de origem não encontrado (pode já ter sido movido/renomeado).")
+            return
+
+        # --- Criação de Pastas ---
         archive_year_folder = os.path.dirname(archive_folder)
+        folder_created_now = False
         try:
-            # Cria pastas (sem alterações na lógica, mas erros são logados e contados)
             if not os.path.exists(archive_year_folder):
                 os.makedirs(archive_year_folder)
                 self.created_folders_count += 1
+                folder_created_now = True
             if not os.path.exists(archive_folder):
                 os.makedirs(archive_folder)
-                self.created_folders_count += 1
+                # Só incrementa se a pasta do mês não existia (evita contar duas vezes se ano e mês foram criados)
+                if not folder_created_now or os.path.dirname(archive_folder) != archive_year_folder:
+                    self.created_folders_count += 1
+
         except OSError as e:
             self.logger.error(
                 f"{file_path} - Motivo: Erro ao criar pasta de destino '{archive_folder}'. Detalhes: {e}")
             self.error_count += 1
-            return  # Cannot proceed if destination folder cannot be created
+            return
 
+        # --- Sanitização, Truncamento e Nomes ---
         original_filename = os.path.basename(file_path)
         sanitized_filename = self._sanitize_filename(original_filename)
-
-        # 1. Truncar o nome sanitizado SE necessário
         max_allowed_path = MAX_PATH_LENGTH - SAFE_FILENAME_MARGIN
-        final_filename = self._truncate_filename(
+        # Calcula o nome final *potencial* após truncamento
+        potential_final_filename = self._truncate_filename(
             archive_folder, sanitized_filename, max_allowed_path)
+        # Calcula o caminho de destino *potencial* inicial
+        potential_destination_path = os.path.join(
+            archive_folder, potential_final_filename)
 
-        destination_path = os.path.join(archive_folder, final_filename)
-
-        # 2. Verificar duplicidade e renomear se necessário
+        # --- Tratamento de Duplicados ---
+        final_filename = potential_final_filename
+        destination_path = potential_destination_path
         counter = 1
-        base, ext = os.path.splitext(final_filename)
-        # Guarda o nome antes do loop de duplicados
-        temp_final_filename = final_filename
+        # Guarda o nome base antes de adicionar sufixos para usar no timestamp se necessário
+        base_before_suffixes, ext = os.path.splitext(potential_final_filename)
 
+        # Loop SÓ executa se o caminho de destino *potencial* já existe
         while os.path.exists(destination_path):
+            # Verifica se o arquivo existente é o próprio arquivo de origem (caso comum se já está no lugar certo e nome ok)
+            try:
+                # os.path.samefile compara inodes/IDs de arquivo, mais seguro que comparar paths
+                if os.path.samefile(file_path, destination_path):
+                    # É o mesmo arquivo, nenhuma ação necessária. Sai do loop e da função.
+                    return
+            except FileNotFoundError:
+                # Se o destino desapareceu entre o exists() e o samefile(), continua para renomear/mover
+                pass
+            except OSError:
+                # Outro erro ao comparar, melhor logar e sair para evitar problemas
+                self.logger.error(
+                    f"{file_path} - Motivo: Erro ao verificar identidade do arquivo existente em '{destination_path}'.")
+                self.error_count += 1
+                return
+
+            # Se chegou aqui, o destino existe e NÃO é o mesmo arquivo de origem, ou samefile falhou.
+            # Precisa gerar um novo nome.
+
             # Tenta adicionar um contador (_1, _2, ...)
-            new_filename_base = f"{base}_{counter}"
-            potential_new_filename = f"{new_filename_base}{ext}"
+            new_filename_base = f"{base_before_suffixes}_{counter}"
+            potential_new_filename_ctr = f"{new_filename_base}{ext}"
 
             # Trunca o nome com contador *antes* de verificar o comprimento total
             truncated_with_counter = self._truncate_filename(
-                archive_folder, potential_new_filename, max_allowed_path)
-            potential_full_path = os.path.join(
+                archive_folder, potential_new_filename_ctr, max_allowed_path)
+            potential_full_path_ctr = os.path.join(
                 archive_folder, truncated_with_counter)
 
             # Verifica se o nome truncado com contador já existe
-            if not os.path.exists(potential_full_path):
+            if not os.path.exists(potential_full_path_ctr):
                 final_filename = truncated_with_counter
-                destination_path = potential_full_path
-                # Log warning about duplicate rename (optional)
-                # self.logger.warning(f"Arquivo duplicado '{temp_final_filename}' em '{archive_folder}'. Renomeando para '{final_filename}' (Origem: {file_path})")
+                destination_path = potential_full_path_ctr
                 break  # Sai do while loop, nome único encontrado
             else:
                 # Se o nome com contador (mesmo truncado) ainda existe, tenta timestamp
-                # Use a base original (antes de adicionar _counter) para o timestamp
-                base_original_sem_contador, ext_original = os.path.splitext(
-                    temp_final_filename)
                 timestamp = datetime.now().strftime("%Y%m%d%H%M%S%f")
-                nome_com_timestamp = f"{base_original_sem_contador}_{timestamp}{ext_original}"
+                nome_com_timestamp = f"{base_before_suffixes}_{timestamp}{ext}"
 
                 # Trunca o nome com timestamp
                 final_filename = self._truncate_filename(
@@ -508,36 +543,56 @@ class FileArchiver:
                     self.logger.error(
                         f"{file_path} - Motivo: Conflito de nome irresolúvel em '{archive_folder}' após tentar adicionar contador e timestamp (arquivo duplicado: {original_filename}).")
                     self.error_count += 1
-                    return  # Aborta a movimentação deste arquivo
+                    return  # Aborta a manipulação deste arquivo
                 else:
-                    # Log warning about duplicate rename with timestamp (optional)
-                    # self.logger.warning(f"Arquivo duplicado '{temp_final_filename}' em '{archive_folder}'. Renomeando para '{final_filename}' com timestamp (Origem: {file_path})")
-                    break  # Sai do while loop, nome único encontrado
+                    break  # Sai do while loop, nome único com timestamp encontrado
 
             counter += 1
-            if counter > 100:  # Safety break to prevent infinite loops
+            if counter > 100:  # Safety break
                 self.logger.error(
-                    f"{file_path} - Motivo: Loop infinito detectado ao tentar renomear arquivo duplicado '{temp_final_filename}' em '{archive_folder}'.")
+                    f"{file_path} - Motivo: Loop infinito detectado ao tentar renomear arquivo duplicado '{potential_final_filename}' em '{archive_folder}'.")
                 self.error_count += 1
                 return  # Aborta
 
-        # 3. Mover o arquivo
+        # --- Decidir Ação: Mover, Renomear ou Nada ---
+
+        # Normaliza os caminhos para comparação segura
+        norm_source_path = os.path.normpath(os.path.abspath(file_path))
+        norm_destination_path = os.path.normpath(
+            os.path.abspath(destination_path))
+
+        # Se após toda a lógica, o caminho de origem e destino são idênticos, não faz nada.
+        if norm_source_path == norm_destination_path:
+            return
+
+        # --- Executar Ação ---
         try:
-            # Double check source exists before moving
+            source_folder = os.path.dirname(norm_source_path)
+            destination_folder = os.path.dirname(norm_destination_path)
+
+            # Verifica se a origem ainda existe antes da ação final
             if not os.path.exists(file_path):
-                self.logger.error(
-                    f"{file_path} - Motivo: Arquivo de origem desapareceu antes da movimentação para '{destination_path}'.")
-                self.error_count += 1
+                self.logger.warning(
+                    f"{file_path} - Arquivo de origem desapareceu antes da ação final para '{destination_path}'.")
+                # Não conta como erro fatal aqui, mas avisa.
                 return
 
-            shutil.move(file_path, destination_path)
-            self.moved_files_count += 1  # Incrementa contador de sucesso
-            # print(f"Arquivo {os.path.basename(destination_path)} arquivado em {archive_folder}") # Removido print
+            if source_folder == destination_folder:
+                # Renomear no local (mesma pasta, nome diferente)
+                os.rename(file_path, destination_path)
+                self.renamed_in_place_count += 1  # Incrementa contador de renomeio
+                # print(f"Arquivo renomeado para {os.path.basename(destination_path)} em {destination_folder}") # Removido print
+            else:
+                # Mover para outra pasta
+                shutil.move(file_path, destination_path)
+                self.moved_files_count += 1  # Incrementa contador de movimentação
+                # print(f"Arquivo {os.path.basename(destination_path)} movido para {destination_folder}") # Removido print
+
         except Exception as e:
+            action = "renomear" if source_folder == destination_folder else "mover"
             self.logger.error(
-                f"{file_path} - Motivo: Falha ao mover para '{destination_path}'. Detalhes: {e}")
+                f"{file_path} - Motivo: Falha ao {action} para '{destination_path}'. Detalhes: {e}")
             self.error_count += 1
-            # Try to restore original name if rename happened due to duplication check? Maybe too complex.
 
 
 # select_folder permanece o mesmo
