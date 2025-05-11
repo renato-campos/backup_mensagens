@@ -1,52 +1,78 @@
-import os
 import shutil
 import logging
 import re
 from datetime import datetime
+from pathlib import Path
+# Set não está sendo usado, mas pode ser útil no futuro. Removido por enquanto.
+from typing import List, Tuple, Optional, Set
+from typing import List, Tuple, Optional
 import tkinter as tk
 from tkinter import filedialog, messagebox
 
 # --- Constantes ---
-MAX_PATH_LENGTH = 255  # Limite máximo de caracteres para um caminho no Windows
-SAFE_FILENAME_MARGIN = 10  # Margem de segurança para evitar atingir o limite exato
+# Limite prático para caminhos no Windows para evitar problemas com funções padrão.
+# MAX_PATH (260) - 1 para o caractere nulo.
+EFFECTIVE_MAX_PATH = 259
+SAFE_PATH_MARGIN = 10  # Margem de segurança para evitar atingir o limite exato
+LOG_FOLDER_NAME = "ERROS"  # Nome da pasta de logs
+# Nomes de pastas a ignorar (em minúsculas)
+DEFAULT_EXCLUDED_FOLDERS = ["erros", "anos anteriores"]
+FALLBACK_SANITIZED_FILENAME = "arquivo_renomeado"
+# Máximo de tentativas para resolver nomes duplicados
+MAX_DUPLICATE_RESOLUTION_ATTEMPTS = 10
 # --- Fim Constantes ---
 
 
 class FileMover:
-    def __init__(self, root_folder, log_folder):
-        # Pasta principal onde os arquivos serão centralizados
-        self.root_folder = root_folder
-        # Pasta para salvar os logs (geralmente 'ERROS' dentro da root_folder)
-        self.log_folder = log_folder
-        self.setup_logger()
-        # Pastas a serem ignoradas durante o processamento
-        self.excluded_folders = ["erros", "anos anteriores"]
+    """
+    Move e renomeia arquivos de subpastas para uma pasta raiz,
+    sanitizando nomes e tratando conflitos e limites de comprimento de caminho.
+    """
 
-    # Métodos públicos (API da classe)
-    def process_files_in_root(self):
+    def __init__(self, root_folder_path: str, log_folder_name: str = LOG_FOLDER_NAME):
+        """
+        Inicializa o FileMover.
+
+        Args:
+            root_folder_path: Caminho para a pasta raiz onde os arquivos serão centralizados.
+            log_folder_name: Nome da pasta onde os logs serão salvos (dentro da root_folder_path).
+        """
+        self.root_folder: Path = Path(root_folder_path).resolve()
+        self.log_folder: Path = self.root_folder / log_folder_name
+        self.setup_logger()
+        self.excluded_folders_lower: List[str] = [
+            f.lower() for f in DEFAULT_EXCLUDED_FOLDERS]
+        self.summary_message: str = ""
+
+    def process_files_in_root(self) -> None:
         """Processa arquivos: move de subpastas para a raiz e renomeia (sanitiza/trunca) arquivos na raiz e os movidos."""
-        if not os.path.exists(self.root_folder):
+        if not self.root_folder.exists() or not self.root_folder.is_dir():
             self.logger.error(
-                f"Pasta raiz não encontrada: {self.root_folder}")
-            # print(f"ERRO: Pasta raiz não encontrada: {self.root_folder}")
+                f"Pasta raiz não encontrada ou não é um diretório: {self.root_folder}")
             return
 
         processed_files_count = 0
         renamed_files_count = 0
         moved_files_count = 0
         error_count = 0
+        max_allowed_path_len = EFFECTIVE_MAX_PATH - SAFE_PATH_MARGIN
 
-        # Itera por todas as pastas, incluindo a raiz (`topdown=True` permite modificar `dirs`)
-        for root, dirs, files in os.walk(self.root_folder, topdown=True):
-            # Remove pastas excluídas da lista `dirs` para não entrar nelas
-            dirs[:] = [d for d in dirs if d.lower(
-            ) not in self.excluded_folders and os.path.join(root, d) != self.log_folder]
+        # Itera por todas as pastas, incluindo a raiz (`topdown=True` permite modificar `dir_names`)
+        for current_root_str, dir_names, file_names in os.walk(str(self.root_folder), topdown=True):
+            current_root_path = Path(current_root_str)
 
-            for original_filename in files:
-                source_path = os.path.join(root, original_filename)
+            # Remove pastas excluídas da lista `dir_names` para não entrar nelas
+            dir_names[:] = [
+                d_name for d_name in dir_names
+                if d_name.lower() not in self.excluded_folders_lower and
+                (current_root_path / d_name).resolve() != self.log_folder.resolve()
+            ]
 
-                # Ignora arquivos dentro da pasta de log
-                if os.path.dirname(source_path) == self.log_folder:
+            for original_filename in file_names:
+                source_path = current_root_path / original_filename
+
+                # Ignora arquivos dentro da pasta de log (comparando pais resolvidos)
+                if source_path.parent.resolve() == self.log_folder.resolve():
                     continue
 
                 # 1. Aplica sanitização ao nome do arquivo
@@ -54,99 +80,78 @@ class FileMover:
                 sanitization_occurred = (
                     original_filename != sanitized_filename)
                 if sanitization_occurred:
-                    # Loga apenas se o nome foi realmente alterado pela sanitização
                     self.logger.info(
-                        f"Sanitizando nome: '{original_filename}' -> '{sanitized_filename}' (Origem: '{root}')")
+                        f"Sanitizando nome: '{original_filename}' -> '{sanitized_filename}' (Origem: '{current_root_path}')")
 
-                # 2. Aplica truncamento ao nome sanitizado, considerando o destino (root_folder)
-                max_allowed_path = MAX_PATH_LENGTH - SAFE_FILENAME_MARGIN
-                target_base_filename = self._truncate_filename(
-                    self.root_folder, sanitized_filename, max_allowed_path)
-                # Nome após sanitização e truncamento inicial
-                final_filename = target_base_filename
+                # 2. Aplica truncamento inicial ao nome sanitizado, considerando o destino (root_folder)
+                current_final_filename = self._truncate_filename(
+                    self.root_folder, sanitized_filename, max_allowed_path_len)
 
-                potential_destination_path = os.path.join(
-                    self.root_folder, final_filename)
+                potential_destination_path = self.root_folder / current_final_filename
 
                 # 3. Pula se o arquivo já está na raiz e o nome final é o mesmo (nenhuma ação necessária)
-                if root == self.root_folder and source_path == potential_destination_path:
+                if current_root_path == self.root_folder and source_path == potential_destination_path:
                     continue
 
                 # 4. Verifica se já existe um arquivo com o nome final no destino (root_folder)
+                #    e resolve conflitos adicionando timestamp e re-truncando se necessário.
                 destination_path = potential_destination_path
-                counter = 1
-                temp_base_filename_for_duplicates = final_filename
-                renamed_due_to_duplicate = False
+                num_attempts = 0
+                original_conflicting_filename_part = current_final_filename  # Para logs mais claros
 
-                while os.path.exists(destination_path):
-                    renamed_due_to_duplicate = True  # Indica que precisou renomear por duplicidade
+                while destination_path.exists() and num_attempts < MAX_DUPLICATE_RESOLUTION_ATTEMPTS:
+                    num_attempts += 1
                     timestamp = datetime.now().strftime("%Y%m%d%H%M%S%f")
-                    base_original_dup, ext_original_dup = os.path.splitext(
-                        temp_base_filename_for_duplicates)
-                    # Gera um novo nome com timestamp
-                    nome_com_timestamp = f"{base_original_dup}_{timestamp}{ext_original_dup}"
+                    base_name, ext = Path(original_conflicting_filename_part).stem, Path(
+                        original_conflicting_filename_part).suffix
 
-                    # Trunca o nome com timestamp novamente, se necessário
-                    final_filename = self._truncate_filename(
-                        self.root_folder, nome_com_timestamp, max_allowed_path)
-                    destination_path = os.path.join(
-                        self.root_folder, final_filename)
+                    name_with_timestamp = f"{base_name}_{timestamp}{ext}"
 
-                    # Verifica se o nome com timestamp ainda colide (raro)
-                    if os.path.exists(destination_path):
-                        self.logger.error(
-                            f"Erro ao tentar renomear arquivo duplicado '{temp_base_filename_for_duplicates}' após adicionar timestamp. Conflito irresolúvel ou caminho muito longo. Pulando '{source_path}'.")
-                        error_count += 1
-                        final_filename = None  # Marca para pular este arquivo
-                        break  # Sai do loop de renomeação
-                    else:
-                        # Loga aviso sobre a renomeação por duplicidade
+                    current_final_filename = self._truncate_filename(
+                        self.root_folder, name_with_timestamp, max_allowed_path_len
+                    )
+                    destination_path = self.root_folder / current_final_filename
+
+                    if num_attempts == 1:  # Loga na primeira tentativa de renomeação por duplicidade
                         self.logger.warning(
-                            f"Arquivo duplicado ou conflito de nome em '{self.root_folder}' para '{temp_base_filename_for_duplicates}'. Renomeando para '{final_filename}' (Origem: '{source_path}')")
-                        break  # Sai do loop, nome único encontrado
+                            f"Conflito de nome em '{self.root_folder}' para '{original_conflicting_filename_part}'. "
+                            f"Tentando renomear para '{current_final_filename}' (Origem: '{source_path}')")
 
-                counter += 1
-                # Limite de segurança para evitar loops infinitos
-                if counter > 5:
+                if destination_path.exists():  # Ainda existe após MAX_ATTEMPTS
                     self.logger.error(
-                        f"Loop inesperado ao tentar renomear '{temp_base_filename_for_duplicates}'. Pulando '{source_path}'.")
+                        f"Não foi possível encontrar um nome único para '{original_conflicting_filename_part}' "
+                        f"em '{self.root_folder}' após {num_attempts} tentativas. Pulando '{source_path}'.")
                     error_count += 1
-                    final_filename = None
-                    break
+                    current_final_filename = None  # Marca para pular este arquivo
 
-                # Pula para o próximo arquivo se houve erro irresolúvel na renomeação
-                if final_filename is None:
+                if current_final_filename is None:
                     continue
 
-                # Atualiza o caminho de destino com o nome final definitivo
-                destination_path = os.path.join(
-                    self.root_folder, final_filename)
+                # destination_path já está atualizado pelo loop acima ou é o potential_destination_path
 
                 # 5. Executa a ação: Mover (se veio de subpasta) ou Renomear (se já estava na raiz)
                 try:
-                    if root == self.root_folder:
+                    if current_root_path == self.root_folder:
                         # Renomeia o arquivo dentro da pasta raiz, se o nome mudou
                         if source_path != destination_path:
-                            os.rename(source_path, destination_path)
+                            source_path.rename(destination_path)
                             renamed_files_count += 1
                             processed_files_count += 1
                     else:
                         # Move o arquivo da subpasta para a raiz
-                        shutil.move(source_path, destination_path)
+                        shutil.move(str(source_path), str(destination_path))
                         moved_files_count += 1
                         processed_files_count += 1
 
-                except Exception as e:
-                    # Loga erro se a movimentação ou renomeação falhar
-                    action_verb = "renomear" if root == self.root_folder else "mover"
+                except (OSError, shutil.Error) as e:
+                    action_verb = "renomear" if current_root_path == self.root_folder else "mover"
                     self.logger.error(
-                        f"Erro ao {action_verb} o arquivo '{source_path}' para '{destination_path}': {e}")
+                        f"Erro ao {action_verb} '{source_path}' para '{destination_path}': {e}")
                     error_count += 1
 
-        # Exibe um resumo da operação para o usuário
         summary_message = "-" * 30 + "\n"
         if processed_files_count > 0:
-            summary_message += f"Processamento concluído:\n"
+            summary_message += "Processamento concluído:\n"
             if renamed_files_count > 0:
                 summary_message += f"- {renamed_files_count} arquivos renomeados na pasta raiz.\n"
             if moved_files_count > 0:
@@ -157,51 +162,57 @@ class FileMover:
         if error_count > 0:
             summary_message += f"\nAtenção: Ocorreram {error_count} erros durante a operação. Verifique o log em '{self.log_folder}'.\n"
         else:
-            # Verifica se algum log foi gerado (mesmo sem erros fatais)
-            log_file_exists = any(fname.startswith("process_root_log_") for fname in os.listdir(
-                self.log_folder)) if os.path.exists(self.log_folder) else False
+            log_file_exists = False
+            if self.log_folder.exists():
+                log_file_exists = any(f.name.startswith(
+                    "process_root_log_") for f in self.log_folder.iterdir() if f.is_file())
+
             if log_file_exists:
                 summary_message += f"\nOperação concluída. Logs de sanitização, truncamento ou renomeação por duplicidade podem ter sido gerados em '{self.log_folder}'.\n"
             else:
                 summary_message += "\nOperação concluída sem erros ou necessidade de alterações nos nomes dos arquivos.\n"
 
-        # Armazene a mensagem para uso posterior
         self.summary_message = summary_message
 
-        # Remove pastas vazias somente se arquivos foram movidos
         if moved_files_count > 0:
             empty_folders_message = self.remove_empty_folders()
             self.summary_message += "\n" + empty_folders_message
         else:
             self.summary_message += "\nNenhuma pasta vazia para remover (nenhum arquivo foi movido)."
 
-    def remove_empty_folders(self):
+    def remove_empty_folders(self) -> str:
         """Remove pastas vazias APENAS das subpastas de onde os arquivos foram movidos."""
         message = "Verificando pastas vazias para remoção...\n"
         removed_count = 0
         error_remove_count = 0
-        # Itera de baixo para cima (`topdown=False`) para remover subpastas antes das pastas pai
-        for root, dirs, _ in os.walk(self.root_folder, topdown=False):
-            # Garante que não tentaremos remover pastas excluídas ou a pasta de log
-            dirs[:] = [d for d in dirs if d.lower(
-            ) not in self.excluded_folders and os.path.join(root, d) != self.log_folder]
 
-            # Não remove a pasta raiz principal nem a pasta de log
-            if root == self.root_folder or root == self.log_folder:
+        # Itera de baixo para cima (`topdown=False`) para remover subpastas antes das pastas pai
+        # Usamos os.walk aqui porque Path.rglob('*').iterdir() não tem topdown=False nativamente
+        # e a lógica de remoção de baixo para cima é crucial.
+        for current_root_str, dir_names, _ in os.walk(str(self.root_folder), topdown=False):
+            current_root_path = Path(current_root_str)
+
+            dir_names[:] = [
+                d_name for d_name in dir_names
+                if d_name.lower() not in self.excluded_folders_lower and
+                (current_root_path / d_name).resolve() != self.log_folder.resolve()
+            ]
+
+            if current_root_path.resolve() == self.root_folder.resolve() or \
+               current_root_path.resolve() == self.log_folder.resolve():
                 continue
 
-            current_folder_name = os.path.basename(root)
-            # Verifica novamente se a pasta atual não está na lista de exclusão
-            if current_folder_name.lower() not in self.excluded_folders:
+            if current_root_path.name.lower() not in self.excluded_folders_lower:
                 try:
-                    # Tenta remover a pasta se estiver vazia
-                    if not os.listdir(root):
-                        os.rmdir(root)
+                    # Verifica se está realmente vazia
+                    if not any(current_root_path.iterdir()):
+                        current_root_path.rmdir()
+                        self.logger.info(
+                            f"Pasta vazia removida: {current_root_path}")
                         removed_count += 1
                 except OSError as e:
-                    # Loga erro se não conseguir verificar ou remover a pasta
                     self.logger.error(
-                        f"Erro ao verificar ou remover a pasta '{root}': {e}")
+                        f"Erro ao verificar ou remover a pasta '{current_root_path}': {e}")
                     error_remove_count += 1
 
         if removed_count > 0:
@@ -214,211 +225,223 @@ class FileMover:
 
         return message
 
-    # Métodos privados auxiliares
-    def setup_logger(self):
+    def setup_logger(self) -> None:
         """Configura o logger para registrar eventos importantes."""
-        if not os.path.exists(self.log_folder):
-            os.makedirs(self.log_folder, exist_ok=True)
+        self.log_folder.mkdir(parents=True, exist_ok=True)
 
         timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-        # Define o nome do arquivo de log com timestamp
-        log_file = os.path.join(
-            self.log_folder, f"process_root_log_{timestamp}.log")
+        log_file = self.log_folder / f"process_root_log_{timestamp}.log"
 
-        self.logger = logging.getLogger(__name__)
+        self.logger = logging.getLogger(
+            f"{__name__}.{id(self)}")  # Nome único para o logger
         if not self.logger.hasHandlers():
-            # Configura o nível mínimo de log a ser capturado (INFO pega sanitização, WARNING pega truncamento/duplicados, ERROR pega falhas)
             self.logger.setLevel(logging.INFO)
-            file_handler = logging.FileHandler(log_file, encoding='utf-8')
-            # Handler processa logs a partir deste nível
+            file_handler = logging.FileHandler(str(log_file), encoding='utf-8')
             file_handler.setLevel(logging.INFO)
             formatter = logging.Formatter(
                 "%(asctime)s - %(levelname)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
             file_handler.setFormatter(formatter)
             self.logger.addHandler(file_handler)
 
-    def _sanitize_filename(self, filename):
-        """Remove ou substitui caracteres inválidos e o prefixo 'msg '."""
-        # 1. Remove o prefixo "msg " (case-insensitive) do início
-        #    O padrão ^ indica o início da string
-        #    re.IGNORECASE faz a busca ignorar maiúsculas/minúsculas
-        # Adicionado \s+ para remover o espaço seguinte também
+    def _sanitize_filename(self, filename: str) -> str:
+        """
+        Remove ou substitui caracteres inválidos, o prefixo 'msg ',
+        espaços extras e normaliza números no início do nome.
+        """
         sanitized = re.sub(r'^msg\s+', '', filename, flags=re.IGNORECASE)
-
-        # 2. Remove caracteres inválidos: < > : " / \ | ? *
         sanitized = re.sub(r'[<>:"/\\|?*]', '_', sanitized)
-
-        # 3. Remove caracteres de controle (ASCII 0-31)
         sanitized = re.sub(r'[\x00-\x1f]', '', sanitized)
-
-        # 4. Remove espaços em branco no início ou fim (após remover prefixo e inválidos)
         sanitized = sanitized.strip()
 
-        # 5. Normaliza números no início do nome para remover zeros à esquerda
-        # Procura por um número no início do nome do arquivo
         match = re.match(r'^(\d+)(.*)', sanitized)
         if match:
             number_str, rest_of_name = match.groups()
-            # Converte para inteiro para remover zeros à esquerda
-            number = int(number_str)
-            # Reconstrói o nome com o número sem zeros à esquerda
-            sanitized = str(number) + rest_of_name
+            try:  # Adicionado try-except para números muito grandes que não cabem em int
+                number = int(number_str)
+                sanitized = str(number) + rest_of_name
+            except ValueError:
+                # Se o número for muito grande, mantenha como string, mas remova zeros à esquerda se houver mais de um dígito e começar com zero
+                if len(number_str) > 1 and number_str.startswith('0'):
+                    sanitized = number_str.lstrip('0') + rest_of_name
+                else:  # Mantém o número original se for um único '0' ou não começar com '0'
+                    sanitized = number_str + rest_of_name
 
-        # 6. Garante que o nome não seja vazio após a limpeza
         if not sanitized:
-            # Se o nome original era apenas "msg " ou algo similar que foi removido
-            sanitized = "arquivo_renomeado"  # Ou gerar um nome único com timestamp
-        # Não loga mais a sanitização
+            self.logger.warning(
+                f"Nome do arquivo '{filename}' resultou em vazio após sanitização. Usando fallback.")
+            sanitized = FALLBACK_SANITIZED_FILENAME
         return sanitized
 
-    def _truncate_filename(self, folder_path, filename, max_len):
-        """Trunca o nome do arquivo se o caminho completo exceder max_len."""
-        base, ext = os.path.splitext(filename)
-        full_path = os.path.join(folder_path, filename)
-        full_path_len = len(full_path)
+    def _truncate_filename(self, target_folder: Path, filename: str, max_full_path_len: int) -> str:
+        """
+        Trunca o nome do arquivo (preservando a extensão) se o caminho completo
+        (target_folder / filename) exceder max_full_path_len.
+        """
+        base, ext = Path(filename).stem, Path(filename).suffix
+        potential_full_path = target_folder / filename
 
-        if full_path_len <= max_len:
-            return filename  # Não precisa truncar
+        if len(str(potential_full_path)) <= max_full_path_len:
+            return filename
 
-        # Calcula o espaço disponível para a base do nome do arquivo
-        available_len_for_base = max_len - \
-            (len(folder_path) + len(os.sep) + len(ext))
+        len_of_folder_path_str = len(str(target_folder))
+        len_of_separator = 1
+        len_of_extension = len(ext)
+
+        available_len_for_base = max_full_path_len - \
+            (len_of_folder_path_str + len_of_separator + len_of_extension)
 
         if available_len_for_base <= 0:
-            # Loga erro se não for possível truncar (caminho da pasta já é muito longo)
             self.logger.error(
-                f"Não é possível criar um nome de arquivo válido para '{filename}' na pasta '{folder_path}' devido ao limite de comprimento ({max_len}). O caminho da pasta é muito longo.")
-            return filename  # Retorna original, o erro ocorrerá no move/rename
+                f"Não é possível criar um nome de arquivo válido para '{filename}' na pasta '{target_folder}' "
+                f"devido ao limite de comprimento ({max_full_path_len}). O caminho da pasta base já é muito longo. "
+                f"Disponível para base: {available_len_for_base}")
+            # Retorna um nome minimamente truncado se possível, ou o original se nem isso for possível
+            # Isso é um caso extremo.
+            if len(ext) < max_full_path_len - (len_of_folder_path_str + len_of_separator):
+                # Tenta pelo menos retornar a extensão se houver espaço
+                minimal_base_len = max_full_path_len - \
+                    (len_of_folder_path_str + len_of_separator + len_of_extension)
+                # Se não há espaço nem para 1 char da base
+                if minimal_base_len < 1 and len(base) > 0:
+                    # Retorna algo como "_ext" ou apenas "_"
+                    return f"_{ext}" if ext else "_"
+                elif minimal_base_len < 1 and len(base) == 0:
+                    return "_"  # Se base e ext são vazios
+            return filename  # Fallback para o nome original se a situação for irrecuperável aqui
 
-        # Guarda o nome original para registrar no log de aviso
-        original_filename_for_log = filename
-        truncated_base = base[:available_len_for_base]
-        truncated_filename = f"{truncated_base}{ext}"
-        # Loga um aviso informando que o nome foi truncado
-        self.logger.warning(
-            f"Nome do arquivo truncado devido ao limite de comprimento do caminho: '{original_filename_for_log}' -> '{truncated_filename}' em '{folder_path}'")
-        return truncated_filename
+        if available_len_for_base < len(base):
+            self.logger.warning(
+                f"Nome do arquivo truncado devido ao limite de comprimento do caminho: '{filename}' -> "
+                f"'{base[:available_len_for_base]}{ext}' em '{target_folder}'")
+            truncated_base = base[:available_len_for_base]
+            return f"{truncated_base}{ext}"
+
+        # Se não precisou truncar a base (já coberto pelo primeiro if, mas como segurança)
+        return filename
 
 
-def select_folder():
+def select_folder() -> Optional[str]:
     """Abre uma janela para o usuário selecionar uma pasta."""
-    root = tk.Tk()
-    root.withdraw()  # Oculta a janela principal do Tkinter
+    root_tk = tk.Tk()
+    root_tk.withdraw()
     folder_selected = filedialog.askdirectory(title="Selecione a Pasta Raiz")
-    root.destroy()  # Fecha a instância do Tkinter
+    root_tk.destroy()
     return folder_selected
 
 
-def main():
-    root = tk.Tk()
-    root.withdraw()
+def main() -> None:
+    """Função principal para executar o processo de movimentação e sanitização de arquivos."""
+    # Necessário para que as caixas de diálogo do tkinter funcionem corretamente
+    # mesmo que a janela principal não seja exibida ou seja destruída rapidamente.
+    root_for_dialogs = tk.Tk()
+    root_for_dialogs.withdraw()
+
     messagebox.showinfo("Seleção de Pasta",
-                        "Selecionando a pasta raiz para centralizar e sanitizar os arquivos...")
+                        "Selecione a pasta raiz para centralizar e sanitizar os arquivos...",
+                        parent=root_for_dialogs)  # Garante que a messagebox fique no topo
 
-    root_folder = select_folder()
-    if not root_folder:
+    root_folder_str = select_folder()
+
+    if not root_folder_str:
         messagebox.showinfo("Operação Cancelada",
-                            "Nenhuma pasta selecionada. Encerrando.")
-        root.destroy()
+                            "Nenhuma pasta selecionada. Encerrando.",
+                            parent=root_for_dialogs)
+        root_for_dialogs.destroy()
         return
 
-    # Define a pasta de logs como 'ERROS' dentro da pasta raiz selecionada
-    log_folder = os.path.join(root_folder, "ERROS")
-
-    if not os.path.exists(root_folder):
-        # Verificação adicional caso a pasta seja removida entre a seleção e o uso
+    root_folder_path = Path(root_folder_str)
+    if not root_folder_path.exists() or not root_folder_path.is_dir():
         messagebox.showerror("Erro",
-                             f"ERRO: A pasta selecionada {root_folder} não foi encontrada.")
-        root.destroy()
+                             f"ERRO: A pasta selecionada {root_folder_path} não foi encontrada ou não é um diretório.",
+                             parent=root_for_dialogs)
+        root_for_dialogs.destroy()
         return
 
-    info_message = f"Pasta raiz selecionada: {root_folder}\n"
-    info_message += f"Os logs de erros e alterações serão salvos em: {log_folder}\n"
+    log_path_display = root_folder_path / LOG_FOLDER_NAME
+    info_message = f"Pasta raiz selecionada: {root_folder_path}\n"
+    info_message += f"Os logs de erros e alterações serão salvos em: {log_path_display}\n"
     info_message += "Iniciando o processo..."
 
-    messagebox.showinfo("Processo Iniciado", info_message)
+    messagebox.showinfo("Processo Iniciado", info_message,
+                        parent=root_for_dialogs)
+    root_for_dialogs.destroy()  # Destruir a root temporária dos dialogs iniciais
 
-    mover = FileMover(root_folder, log_folder)
-    mover.process_files_in_root()  # Chama o método principal da classe
+    # Precisamos importar os aqui porque FileMover ainda usa os.walk internamente
+    # Se FileMover for totalmente migrado para não usar os.walk, esta importação pode ser removida.
+    # TODO: Avaliar a substituição completa de os.walk em FileMover se Path.glob/rglob for suficiente.
+    global os
+    import os
 
-    # Verificar se existem logs para informar ao usuário
-    log_files = [f for f in os.listdir(log_folder) if f.startswith(
-        "process_root_log_") and f.endswith(".log")] if os.path.exists(log_folder) else []
+    mover = FileMover(root_folder_str)
+    mover.process_files_in_root()
+
+    log_files_exist = False
+    if mover.log_folder.exists():
+        log_files_exist = any(f.name.startswith("process_root_log_") and f.name.endswith(
+            ".log") for f in mover.log_folder.iterdir() if f.is_file())
 
     final_message = mover.summary_message + "\n\n"
-    if log_files:
-        final_message += f"Verifique o arquivo de log em '{log_folder}' para detalhes sobre erros ou alterações realizadas nos nomes dos arquivos."
+    if log_files_exist:
+        final_message += f"Verifique o(s) arquivo(s) de log em '{mover.log_folder}' para detalhes sobre erros ou alterações realizadas nos nomes dos arquivos."
     else:
         final_message += "Nenhum erro ou alteração significativa foi registrada durante o processo."
 
-    # Substituir messagebox.showinfo por show_auto_close_message
-    root.destroy()  # Destruir a janela root antes de criar a nova
-    show_auto_close_message(final_message, 10000)  # 10 segundos
+    show_auto_close_message(final_message, 10000)
 
 
-def show_auto_close_message(message, timeout):
+def show_auto_close_message(message: str, timeout: int) -> None:
     """
     Exibe uma mensagem que se fecha automaticamente após o tempo especificado.
-
-    Args:
-        message: Texto da mensagem
-        timeout: Tempo em milissegundos antes do fechamento automático
     """
-    # Criar janela
-    root = tk.Tk()
-    root.title("Processamento Concluído")
+    msg_root = tk.Tk()
+    msg_root.title("Processamento Concluído")
 
-    # Centralizar na tela
     window_width = 500
-    window_height = 500
-    screen_width = root.winfo_screenwidth()
-    screen_height = root.winfo_screenheight()
+    window_height = 300  # Ajustado para melhor visualização da mensagem
+    screen_width = msg_root.winfo_screenwidth()
+    screen_height = msg_root.winfo_screenheight()
     x_coordinate = int((screen_width - window_width) / 2)
     y_coordinate = int((screen_height - window_height) / 2)
-    root.geometry(
+    msg_root.geometry(
         f"{window_width}x{window_height}+{x_coordinate}+{y_coordinate}")
 
-    # Adicionar texto
-    frame = tk.Frame(root, padx=20, pady=20)
+    frame = tk.Frame(msg_root, padx=20, pady=20)
     frame.pack(fill=tk.BOTH, expand=True)
 
-    # Adicionar contador regressivo
     countdown_var = tk.StringVar()
-    countdown_var.set(f"Esta mensagem se fechará em {timeout//1000} segundos")
 
-    # Título
     title_label = tk.Label(
         frame, text="Processamento Concluído", font=("Arial", 14, "bold"))
     title_label.pack(pady=(0, 10))
 
-    # Mensagem principal
-    msg_label = tk.Label(frame, text=message, justify=tk.LEFT, wraplength=450)
-    msg_label.pack(pady=10)
+    # Usar um Text widget para melhor formatação e scrollbar se necessário
+    msg_text_area = tk.Text(frame, wrap=tk.WORD, height=10,
+                            width=60, relief=tk.FLAT, background=msg_root.cget('bg'))
+    msg_text_area.insert(tk.END, message)
+    msg_text_area.config(state=tk.DISABLED)  # Torna o texto não editável
+    msg_text_area.pack(pady=10, fill=tk.BOTH, expand=True)
 
-    # Contador
     countdown_label = tk.Label(frame, textvariable=countdown_var, fg="gray")
     countdown_label.pack(pady=(10, 0))
 
-    # Botão para fechar manualmente
-    close_button = tk.Button(frame, text="Fechar", command=root.destroy)
+    close_button = tk.Button(
+        frame, text="Fechar Manualmente", command=msg_root.destroy)
     close_button.pack(pady=10)
 
-    # Função para atualizar o contador e fechar a janela
-    def update_countdown(remaining):
-        if remaining <= 0:
-            root.destroy()
+    def update_countdown(remaining: int) -> None:
+        if not msg_root.winfo_exists():  # Verifica se a janela ainda existe
             return
-        countdown_var.set(f"Esta mensagem se fechará em {remaining} segundos")
-        root.after(1000, update_countdown, remaining - 1)
+        if remaining <= 0:
+            if msg_root.winfo_exists():
+                msg_root.destroy()
+            return
+        countdown_var.set(f"Esta janela fechará em {remaining} segundos")
+        msg_root.after(1000, update_countdown, remaining - 1)
 
-    # Iniciar o contador
-    root.after(0, update_countdown, timeout // 1000)
-
-    # Iniciar o temporizador para fechar a janela
-    root.after(timeout, root.destroy)
-
-    # Iniciar loop principal
-    root.mainloop()
+    msg_root.after(0, update_countdown, timeout // 1000)
+    msg_root.after(timeout, lambda: msg_root.destroy()
+                   if msg_root.winfo_exists() else None)
+    msg_root.mainloop()
 
 
 if __name__ == "__main__":

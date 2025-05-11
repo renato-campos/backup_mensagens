@@ -394,8 +394,6 @@ def select_folder():
     root.destroy()  # Fecha a instância do Tkinter temporária
     return folder_selected
 
-# --- Copiado de arquiva_raiz.py ---
-
 
 def show_auto_close_message(message, timeout):
     """
@@ -472,7 +470,7 @@ def show_auto_close_message(message, timeout):
 
     # Iniciar loop principal
     root.mainloop()
-# --- Fim Copiado de arquiva_raiz.py ---
+
 
 
 def main():

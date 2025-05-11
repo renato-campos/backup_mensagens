@@ -1,193 +1,238 @@
 import os
-import tkinter as tk
+import tkinter as tk_module # Alias para evitar conflitos
 from tkinter import filedialog, messagebox
 import logging
 from datetime import datetime
+from pathlib import Path
+from typing import Optional, Set, List
+
+# --- Constantes ---
+LOG_FOLDER_NAME = "ERROS"
+LOG_FILENAME_PREFIX = "comparison_failures_"
+# --- Fim Constantes ---
 
 class FolderComparer:
+    """
+    Compara o conteúdo de duas pastas (incluindo subpastas) e gera um relatório
+    listando os arquivos exclusivos de cada uma.
+    """
     def __init__(self):
-        self.folder1 = None
-        self.folder2 = None
-        self.setup_logger()
-        
-    def setup_logger(self):
-        """Configura o sistema de logging para registrar erros."""
-        self.log_folder = None  # Será definido após selecionar a primeira pasta
-        self.logger = logging.getLogger("folder_comparer")
-        self.logger.setLevel(logging.ERROR)
-        # Handler será adicionado após definir a pasta de log
-        
-    def configure_log_folder(self):
-        """Configura a pasta de log após a seleção da primeira pasta."""
+        self.folder1: Optional[Path] = None
+        self.folder2: Optional[Path] = None
+        self.log_file_path: Optional[Path] = None # Caminho completo do arquivo de log
+        self.logger: logging.Logger = self._setup_initial_logger()
+
+    def _setup_initial_logger(self) -> logging.Logger:
+        """Configura o logger inicialmente sem um file handler."""
+        logger = logging.getLogger(f"{__name__}.FolderComparer.{id(self)}")
+        logger.setLevel(logging.ERROR)
+        logger.propagate = False # Evita logs duplicados se um root logger estiver configurado
+        if not logger.hasHandlers(): # Adiciona NullHandler para evitar warnings "No handlers found"
+            logger.addHandler(logging.NullHandler())
+        return logger
+
+    def _configure_file_logging(self) -> None:
+        """
+        Configura o file handler para o logger.
+        Este método deve ser chamado após self.folder1 ser definido.
+        """
         if not self.folder1:
+            print("ERRO INTERNO: Tentativa de configurar log de arquivo sem a primeira pasta definida.")
             return
-            
-        self.log_folder = os.path.join(self.folder1, "ERROS")
-        if not os.path.exists(self.log_folder):
-            try:
-                os.makedirs(self.log_folder)
-            except Exception as e:
-                print(f"ERRO: Não foi possível criar a pasta de log: {e}")
-                return
-                
-        # Evita duplicação de handlers
-        if self.logger.handlers:
-            self.logger.handlers.clear()
-            
-        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-        log_file = os.path.join(self.log_folder, f"comparison_failures_{timestamp}.log")
-        
+
+        log_dir = self.folder1 / LOG_FOLDER_NAME
         try:
-            file_handler = logging.FileHandler(log_file, encoding='utf-8')
+            log_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            print(f"AVISO: Não foi possível criar a pasta de log '{log_dir}': {e}. Logs de erro não serão salvos em arquivo.")
+            return # Não configura o file handler se a pasta não puder ser criada
+
+        # Remove handlers anteriores (especialmente o NullHandler)
+        for handler in self.logger.handlers[:]:
+            self.logger.removeHandler(handler)
+            if hasattr(handler, 'close'): # Fecha o handler se possível
+                handler.close()
+
+        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+        self.log_file_path = log_dir / f"{LOG_FILENAME_PREFIX}{timestamp}.log"
+
+        try:
+            file_handler = logging.FileHandler(str(self.log_file_path), encoding='utf-8')
             formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
             file_handler.setFormatter(formatter)
             self.logger.addHandler(file_handler)
-        except Exception as e:
-            print(f"ERRO: Não foi possível configurar o logger: {e}")
-            # Adiciona um handler nulo para evitar erros
-            self.logger.addHandler(logging.NullHandler())
-    
-    def select_folders(self):
+        except Exception as e: # Captura qualquer exceção durante a configuração do handler
+            print(f"AVISO: Não foi possível configurar o logger para o arquivo '{self.log_file_path}': {e}. "
+                  "Logs de erro podem não ser salvos.")
+            # Se a configuração do FileHandler falhar, readiciona o NullHandler
+            if not self.logger.hasHandlers():
+                self.logger.addHandler(logging.NullHandler())
+
+    def select_folders(self) -> bool:
         """Solicita ao usuário selecionar duas pastas via interface gráfica."""
-        root = tk.Tk()
-        root.withdraw()  # Oculta a janela principal
-        
-        # Seleciona a primeira pasta
-        self.folder1 = filedialog.askdirectory(title="Selecione a primeira pasta")
-        if not self.folder1:
-            messagebox.showinfo("Operação cancelada", "Seleção da primeira pasta cancelada pelo usuário.")
+        root = tk_module.Tk()
+        root.withdraw()
+
+        folder1_str = filedialog.askdirectory(title="Selecione a Primeira Pasta (Base para Logs e Relatório)")
+        if not folder1_str:
+            messagebox.showinfo("Operação Cancelada", "Seleção da primeira pasta cancelada.")
+            root.destroy()
             return False
-            
-        # Configura o logger após selecionar a primeira pasta
-        self.configure_log_folder()
-        
-        # Seleciona a segunda pasta
-        self.folder2 = filedialog.askdirectory(title="Selecione a segunda pasta")
-        if not self.folder2:
-            messagebox.showinfo("Operação cancelada", "Seleção da segunda pasta cancelada pelo usuário.")
+        self.folder1 = Path(folder1_str)
+
+        # Configura o logging de arquivo agora que folder1 é conhecido
+        self._configure_file_logging()
+
+        folder2_str = filedialog.askdirectory(title="Selecione a Segunda Pasta")
+        if not folder2_str:
+            messagebox.showinfo("Operação Cancelada", "Seleção da segunda pasta cancelada.")
+            root.destroy()
             return False
-            
+        self.folder2 = Path(folder2_str)
+
+        root.destroy()
         return True
-    
-    def get_files_in_folder(self, folder_path):
-        """Obtém a lista de arquivos em uma pasta e suas subpastas."""
-        files = []
+
+    def _get_files_in_folder(self, folder_path: Path) -> Set[str]:
+        """Obtém um conjunto de caminhos de arquivo relativos em uma pasta e suas subpastas."""
+        relative_files: Set[str] = set()
+        if not folder_path.is_dir(): # Verifica se o caminho é um diretório válido
+            self.logger.error(f"A pasta fornecida não existe ou não é um diretório: {folder_path}")
+            return relative_files
+
         try:
-            for root, _, filenames in os.walk(folder_path):
+            # os.walk é mantido pela sua robustez e conveniência com os.path.relpath
+            for root, _, filenames in os.walk(str(folder_path)):
                 for filename in filenames:
-                    # Ignora arquivos de sistema como .ffs_db
-                    if filename.lower() == ".ffs_db":
+                    if filename.lower() == ".ffs_db": # Exclusão específica
                         continue
-                    # Caminho relativo à pasta raiz para comparação justa
-                    rel_path = os.path.relpath(os.path.join(root, filename), folder_path)
-                    files.append(rel_path)
-        except Exception as e:
-            self.logger.error(f"Erro ao listar arquivos em {folder_path}: {e}")
+                    
+                    full_path_str = os.path.join(root, filename)
+                    try:
+                        # os.path.relpath para obter o caminho relativo
+                        rel_path_str = os.path.relpath(full_path_str, str(folder_path))
+                        # Normaliza separadores para consistência entre OS
+                        relative_files.add(rel_path_str.replace(os.sep, '/'))
+                    except ValueError as e_relpath: # Caso raro, mas possível
+                        self.logger.error(f"Erro ao calcular caminho relativo para {full_path_str} a partir de {folder_path}: {e_relpath}")
+        except Exception as e_walk: # Captura erros durante o próprio os.walk
+            self.logger.error(f"Erro ao listar arquivos em {folder_path}: {e_walk}")
         
-        return files
-    
-    def compare_folders(self):
-        """Compara os arquivos entre as duas pastas e gera um relatório."""
+        return relative_files
+
+    def compare_folders(self) -> str:
+        """Compara os arquivos entre as duas pastas e gera uma string de relatório."""
         if not self.folder1 or not self.folder2:
-            return "Erro: Pastas não selecionadas."
+            # Esta verificação deve ser feita pelo método chamador (run)
+            return "ERRO: As duas pastas não foram selecionadas."
             
-        print(f"Comparando pastas:\n1: {self.folder1}\n2: {self.folder2}")
+        print(f"Comparando pastas:\nPasta 1: {self.folder1}\nPasta 2: {self.folder2}")
         
         try:
-            # Obtém listas de arquivos (caminhos relativos)
-            files1 = set(self.get_files_in_folder(self.folder1))
-            files2 = set(self.get_files_in_folder(self.folder2))
+            files1 = self._get_files_in_folder(self.folder1)
+            files2 = self._get_files_in_folder(self.folder2)
             
-            # Identifica arquivos exclusivos de cada pasta
-            only_in_folder1 = files1 - files2
-            only_in_folder2 = files2 - files1
+            only_in_folder1 = sorted(list(files1 - files2)) # Ordena para saída consistente
+            only_in_folder2 = sorted(list(files2 - files1)) # Ordena
+            common_files = files1.intersection(files2)
             
-            # Gera o relatório
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            report = [
+            report_lines: List[str] = [
                 f"RELATÓRIO DE COMPARAÇÃO DE PASTAS - {timestamp}",
                 f"\nPasta 1: {self.folder1}",
                 f"Pasta 2: {self.folder2}",
-                f"\nTotal de arquivos na Pasta 1: {len(files1)}",
-                f"Total de arquivos na Pasta 2: {len(files2)}",
+                f"\nTotal de arquivos na Pasta 1 (considerados): {len(files1)}",
+                f"Total de arquivos na Pasta 2 (considerados): {len(files2)}",
                 f"\n{'=' * 80}",
                 f"\nARQUIVOS EXCLUSIVOS DA PASTA 1 ({len(only_in_folder1)} arquivos):",
                 f"{'=' * 80}"
             ]
             
             if only_in_folder1:
-                for file in sorted(only_in_folder1):
-                    report.append(file)
+                report_lines.extend(only_in_folder1)
             else:
-                report.append("Nenhum arquivo exclusivo encontrado.")
+                report_lines.append("Nenhum arquivo exclusivo encontrado.")
                 
-            report.extend([
+            report_lines.extend([
                 f"\n{'=' * 80}",
                 f"\nARQUIVOS EXCLUSIVOS DA PASTA 2 ({len(only_in_folder2)} arquivos):",
                 f"{'=' * 80}"
             ])
             
             if only_in_folder2:
-                for file in sorted(only_in_folder2):
-                    report.append(file)
+                report_lines.extend(only_in_folder2)
             else:
-                report.append("Nenhum arquivo exclusivo encontrado.")
+                report_lines.append("Nenhum arquivo exclusivo encontrado.")
                 
-            report.extend([
+            report_lines.extend([
                 f"\n{'=' * 80}",
                 f"\nRESUMO:",
-                f"Arquivos em comum: {len(files1.intersection(files2))}",
+                f"Arquivos em comum: {len(common_files)}",
                 f"Arquivos exclusivos da Pasta 1: {len(only_in_folder1)}",
                 f"Arquivos exclusivos da Pasta 2: {len(only_in_folder2)}",
                 f"{'=' * 80}"
             ])
             
-            return "\n".join(report)
+            return "\n".join(report_lines)
             
         except Exception as e:
             error_msg = f"Erro durante a comparação: {e}"
             self.logger.error(error_msg)
-            return f"ERRO NA COMPARAÇÃO: {error_msg}"
-    
-    def save_report(self, report_content):
-        """Salva o relatório em um arquivo de texto na primeira pasta."""
+            print(f"ERRO DURANTE COMPARAÇÃO: {error_msg}") # Feedback imediato
+            return f"ERRO NA COMPARAÇÃO: {error_msg}. Verifique o console ou o arquivo de log (se configurado)."
+
+    def save_report(self, report_content: str) -> Optional[Path]:
+        """Salva o relatório em um arquivo de texto na primeira pasta selecionada."""
         if not self.folder1:
-            return False
+            print("ERRO: A primeira pasta não foi selecionada, não é possível salvar o relatório.")
+            return None
             
         timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-        report_filename = os.path.join(self.folder1, f"comparacao_pastas_{timestamp}.txt")
+        # O relatório é salvo diretamente na folder1, não na subpasta de logs
+        report_file_path = self.folder1 / f"comparacao_pastas_{timestamp}.txt"
         
         try:
-            with open(report_filename, 'w', encoding='utf-8') as f:
+            with report_file_path.open('w', encoding='utf-8') as f:
                 f.write(report_content)
-            print(f"Relatório salvo em: {report_filename}")
-            return report_filename
-        except Exception as e:
-            error_msg = f"Erro ao salvar o relatório: {e}"
+            print(f"Relatório salvo em: {report_file_path}")
+            return report_file_path
+        except (IOError, OSError) as e: # Captura exceções de I/O
+            error_msg = f"Erro ao salvar o relatório em '{report_file_path}': {e}"
             self.logger.error(error_msg)
-            print(f"ERRO: {error_msg}")
-            return False
-    
-    def run(self):
-        """Executa o fluxo completo de comparação de pastas."""
+            print(f"ERRO: {error_msg}") # Feedback imediato
+            return None
+
+    def run(self) -> None:
+        """Executa o fluxo completo de seleção de pastas, comparação e salvamento do relatório."""
         print("Iniciando comparação de pastas...")
         
-        # Solicita as pastas
         if not self.select_folders():
+            print("Seleção de pastas não concluída ou cancelada. Encerrando.")
             return
             
-        # Realiza a comparação
-        report = self.compare_folders()
+        # self.folder1 e self.folder2 devem estar definidos se select_folders retornou True
+        if not self.folder1 or not self.folder2: # Verificação de segurança adicional
+            messagebox.showerror("Erro", "Ambas as pastas devem ser selecionadas para comparação.")
+            return
+
+        report_content = self.compare_folders()
         
-        # Salva o relatório
-        report_path = self.save_report(report)
+        if report_content.startswith("ERRO NA COMPARAÇÃO:"):
+            messagebox.showerror("Erro na Comparação", report_content)
+            if self.log_file_path:
+                 messagebox.showinfo("Log de Erros", f"Detalhes adicionais podem estar no arquivo de log: {self.log_file_path}")
+            return
+
+        saved_report_path = self.save_report(report_content)
         
-        if report_path:
-            messagebox.showinfo("Comparação concluída", 
-                               f"Relatório de comparação salvo em:\n{report_path}")
+        if saved_report_path:
+            messagebox.showinfo("Comparação Concluída", 
+                               f"Relatório de comparação salvo em:\n{saved_report_path}")
         else:
-            messagebox.showerror("Erro", 
-                                "Não foi possível salvar o relatório. Verifique o log de erros.")
+            messagebox.showerror("Erro ao Salvar Relatório", 
+                                "Não foi possível salvar o relatório. Verifique o console para erros.")
+            if self.log_file_path: # Informa sobre o log de erros se o salvamento do relatório falhou
+                 messagebox.showinfo("Log de Erros", f"Detalhes do erro de salvamento podem estar no arquivo de log: {self.log_file_path}")
 
 if __name__ == "__main__":
     comparer = FolderComparer()

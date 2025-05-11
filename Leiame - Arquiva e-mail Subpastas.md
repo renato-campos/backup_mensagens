@@ -1,135 +1,69 @@
-# Análise Aprofundada do Script arquiva_subpastas.py
+# Arquivador Recursivo de E-mails e Arquivos (`arquiva_subpastas.py`)
 
-## Objetivo Principal
+## 1. Objetivo
 
-O script `arquiva_subpastas.py` é uma ferramenta especializada para organização cronológica de arquivos, particularmente emails (`.eml`) e outros documentos, dentro de uma estrutura hierárquica baseada em data. Seu propósito fundamental é transformar uma estrutura de pastas potencialmente desorganizada em um sistema de arquivamento ordenado por ano e mês.
+Este script Python, com interface gráfica para seleção de pasta, tem como objetivo principal organizar arquivos (com foco especial em e-mails `.eml`) que estão dispersos dentro de uma pasta selecionada **e suas subpastas**. A organização é feita **in-place**, ou seja, os arquivos são movidos para subpastas estruturadas por ano e mês (`YYYY/YYYY-MM`) dentro da própria pasta raiz selecionada, transformando uma estrutura potencialmente desorganizada em um arquivo cronológico.
 
-Diferentemente de outros scripts similares, este foi projetado especificamente para:
+## 2. Funcionalidades Principais
 
-1.  **Processar recursivamente** uma estrutura de pastas existente a partir de um diretório raiz.
-2.  **Reorganizar os arquivos *in-place***, ou seja, dentro da própria estrutura de pastas selecionada, em vez de movê-los para um local de arquivamento separado.
+*   **Interface Gráfica para Seleção:** Utiliza Tkinter para permitir ao usuário selecionar facilmente a pasta raiz que contém os arquivos e subpastas a serem organizados.
+*   **Processamento Recursivo:** Varre a pasta selecionada e **todas as suas subpastas** em busca de arquivos para organizar.
+*   **Organização *In-Place*:** Move os arquivos para as pastas `YYYY/YYYY-MM` corretas **dentro** da estrutura da pasta raiz selecionada. Não cria uma pasta de arquivamento separada.
+*   **Exclusão de Pastas:** Ignora automaticamente pastas chamadas `ERROS` e `anos anteriores` (case-insensitive) durante a varredura recursiva, além da própria pasta de logs.
+*   **Ignora Arquivos Específicos:** Arquivos `.ffs_db` (usados pelo FreeFileSync) são ignorados.
+*   **Processamento Baseado na Data:**
+    *   **Arquivos `.eml`:** Extrai a data do cabeçalho `Date`. Tenta múltiplos formatos e encodings (UTF-8, Latin-1). Se a análise falhar, usa a data/hora atual e registra um erro.
+    *   **Outros Arquivos:** Utiliza a data e hora da última modificação do arquivo (`os.path.getmtime`). Se não for possível obter a data, registra um erro e **não** move o arquivo.
+*   **Criação Automática de Subpastas:** Cria as subpastas de destino no formato `YYYY/YYYY-MM` (ex: `2024/2024-05`) dentro da pasta raiz selecionada, caso ainda não existam. Incrementa um contador de pastas criadas.
+*   **Sanitização Inteligente de Nomes:**
+    *   Remove o prefixo `msg ` (ignorando maiúsculas/minúsculas).
+    *   Substitui caracteres inválidos (`<`, `>`, `:`, `"`, `/`, `\`, `|`, `?`, `*`) por underscores (`_`).
+    *   Remove caracteres de controle invisíveis.
+    *   Remove espaços/pontos no início/fim.
+    *   Normaliza números no início (ex: `001_` vira `1_`).
+    *   Garante nome não vazio (fallback: "arquivo_renomeado").
+*   **Prevenção de Caminhos Longos:** Trunca nomes de arquivo se o caminho completo de destino exceder um limite seguro (245 caracteres), tentando preservar a extensão e lidando com caracteres multi-byte (UTF-8).
+*   **Resolução de Conflitos (Duplicados):**
+    *   Verifica se um arquivo com o mesmo nome já existe no destino usando `os.path.samefile` para evitar mover/renomear desnecessariamente se for o mesmo arquivo.
+    *   Se for um arquivo diferente com o mesmo nome, tenta adicionar sufixo numérico (`_1`, `_2`, ...).
+    *   Se ainda houver conflito ou o nome ficar muito longo, tenta adicionar um timestamp detalhado (`_YYYYMMDDHHMMSSffffff`) ao nome original (antes do sufixo numérico) e trunca novamente se necessário.
+    *   Registra um erro se não conseguir encontrar um nome único.
+*   **Distinção entre Mover e Renomear:** Identifica se a operação necessária é mover o arquivo para uma pasta `YYYY/YYYY-MM` diferente ou apenas renomeá-lo (sanitizar/truncar/resolver duplicata) dentro da sua pasta `YYYY/YYYY-MM` atual. Contadores separados para cada ação.
+*   **Registro Detalhado de Erros:** Cria uma subpasta `ERROS` na raiz selecionada. Erros que impedem o processamento/movimentação (falha na leitura, falha ao obter data, falha ao criar pasta, falha ao mover/renomear, conflitos irresolúveis) são registrados em um arquivo `archive_failures_*.log`.
+*   **Relatório Final:** Exibe uma janela de resumo (que fecha automaticamente após 5 segundos) detalhando:
+    *   Número de arquivos movidos para a pasta correta.
+    *   Número de arquivos renomeados no local (sanitização/truncamento/duplicata).
+    *   Número de novas pastas `YYYY/YYYY-MM` criadas.
+    *   Número total de erros encontrados.
+    *   Instruções para verificar os logs em caso de erros.
 
-## Arquitetura e Design
+## 3. Modo de Usar
 
-O script implementa uma arquitetura orientada a objetos centrada na classe `FileArchiver`, que encapsula toda a lógica de processamento e organização de arquivos. Esta abordagem modular facilita a manutenção e possíveis extensões futuras do código.
+1.  **Execute o Script:** Certifique-se de ter o Python 3 instalado. Execute o script `arquiva_subpastas.py` (por exemplo, clicando duas vezes nele ou rodando `python arquiva_subpastas.py` no terminal).
+2.  **Mensagem Inicial:** Uma pequena janela aparecerá instruindo você a selecionar a pasta principal onde seus arquivos e subpastas estão localizados e serão organizados. Clique em "OK".
+3.  **Selecione a Pasta Raiz:** Uma janela de diálogo do sistema operacional será aberta. Navegue até a pasta principal que você deseja organizar (o script processará esta pasta e todas as suas subpastas) e clique em "Selecionar pasta" (ou o botão equivalente).
+4.  **Confirmação:** Outra janela informativa aparecerá, confirmando a pasta selecionada e informando onde os logs de erro serão salvos (na subpasta `ERROS` dentro da pasta selecionada). Clique em "OK" para iniciar o processo.
+5.  **Aguarde o Processamento:** O script começará a varrer a pasta selecionada e todas as suas subpastas. Ele analisará cada arquivo, determinará a data correta, sanitizará o nome e o moverá para a subpasta `YYYY/YYYY-MM` apropriada dentro da estrutura original. Este processo pode levar algum tempo dependendo da quantidade de arquivos e pastas. Nenhuma janela de progresso é exibida.
+6.  **Verifique o Resumo Final:** Ao final, uma janela intitulada "Processamento Concluído" aparecerá com um resumo detalhado:
+    *   Quantos arquivos foram movidos para pastas de data corretas.
+    *   Quantos arquivos foram apenas renomeados dentro de suas pastas atuais.
+    *   Quantas novas pastas de data (`YYYY/YYYY-MM`) foram criadas.
+    *   Quantos erros ocorreram durante o processo.
+    *   Se houver erros, indicará para verificar a pasta `ERROS`.
+    *   Esta janela desaparecerá sozinha após 5 segundos, ou você pode clicar em "Fechar Agora".
+7.  **Consulte os Logs (se necessário):** Se a mensagem final indicou erros, navegue até a pasta raiz que você selecionou, abra a subpasta `ERROS` e procure pelo arquivo `.log` mais recente (ex: `archive_failures_20240521153000.log`). Abra este arquivo em um editor de texto para ver os detalhes dos arquivos que falharam e o motivo.
+8.  **Verifique a Organização:** Explore a pasta raiz que você selecionou. Os arquivos agora devem estar organizados dentro das subpastas `YYYY/YYYY-MM`. Pastas que ficaram vazias após a movimentação **não** são removidas automaticamente.
 
-## Funcionalidades Principais
+## 4. Especificações Técnicas
 
-### 1. Processamento Recursivo de Diretórios
-
-*   **Navegação Inteligente:** Percorre recursivamente todas as subpastas a partir de um diretório raiz selecionado pelo usuário via interface gráfica (Tkinter).
-*   **Exclusão Seletiva:** Ignora pastas específicas durante o processamento (atualmente configurado para ignorar `"ERROS"` e pastas que começam com `.` como `.git`, mas pode ser adaptado). Ignora também arquivos específicos como `.ffs_db`.
-*   **Tratamento Diferenciado:** Processa arquivos `.eml` e outros tipos de forma distinta, extraindo metadados apropriados para cada tipo.
-
-### 2. Extração e Análise de Datas
-
-*   **Para arquivos `.eml`:**
-    *   Tenta abrir o arquivo com codificação `UTF-8` primeiro.
-    *   Se falhar, tenta com `Latin-1` como fallback.
-    *   Extrai o campo `"Date"` do cabeçalho do email.
-    *   Utiliza o método `_parse_date()` com múltiplas estratégias (incluindo `email.utils`, `strptime` com vários formatos e limpeza com regex) para converter a string de data em um objeto `datetime`.
-    *   Utiliza a data atual como mecanismo de segurança em caso de falha completa na extração.
-*   **Para outros tipos de arquivo:**
-    *   Obtém o timestamp de modificação do sistema de arquivos (`os.path.getmtime`).
-    *   Converte para um objeto `datetime`.
-
-### 3. Arquivamento Cronológico
-
-*   **Estrutura Hierárquica:** Organiza os arquivos em uma estrutura de pastas dentro da raiz selecionada:
-    *   Primeiro nível: Ano (ex: `"2024"`)
-    *   Segundo nível: Ano-Mês (ex: `"2024-03"`)
-*   **Verificação de Posicionamento:** Evita movimentações desnecessárias comparando o caminho absoluto normalizado da pasta atual do arquivo com o caminho de destino calculado.
-*   **Criação Automática:** Gera as pastas de destino (`Ano/Ano-Mês`) quando não existem, utilizando `os.makedirs(exist_ok=True)`.
-
-### 4. Tratamento Robusto de Nomes de Arquivo
-
-*   **Sanitização:**
-    *   Remove prefixos redundantes como `"msg "` ou `"MSG "`.
-    *   Substitui caracteres inválidos para sistemas de arquivos (`< > : " / \ | ? *`) por underscores.
-    *   Remove caracteres de controle ASCII (0-31).
-    *   Garante que o nome não fique vazio (usa `"arquivo_renomeado"` como padrão).
-*   **Truncamento Adaptativo:**
-    *   Calcula o comprimento máximo permitido para o nome base do arquivo, considerando o caminho completo de destino e uma margem de segurança (`SAFE_FILENAME_MARGIN = 10`), para evitar exceder limites do sistema de arquivos (como MAX_PATH no Windows).
-    *   Preserva a extensão do arquivo durante o truncamento.
-*   **Resolução de Conflitos:**
-    *   Verifica se já existe um arquivo com o mesmo nome no destino.
-    *   Se existir, implementa uma estratégia progressiva:
-        1.  Tenta adicionar um contador incremental (`_1`, `_2`, etc.).
-        2.  Se o nome com contador ainda exceder o limite de tamanho, utiliza um timestamp de alta precisão (`_YYYYMMDDHHMMSSffffff`).
-    *   Em caso extremamente raro de conflito irresolúvel, registra um erro e abandona o processamento daquele arquivo específico.
-
-### 5. Sistema de Logging Focado em Erros
-
-*   **Registro Seletivo:** Configurado para capturar apenas erros críticos (`logging.ERROR`), mantendo os logs concisos e focados em problemas.
-*   **Detalhamento de Falhas:** Cria um arquivo de log (`archive_failures_YYYYMMDDHHMMSS.log`) na subpasta `"ERROS"` da raiz, registrando informações contextuais completas: caminho do arquivo, motivo da falha e detalhes da exceção.
-*   **Feedback ao Usuário:** Informa sobre a existência e localização dos logs de erro ao final da execução, caso algum erro tenha ocorrido.
-
-## Fluxo de Execução Detalhado
-
-1.  **Inicialização e Configuração:**
-    *   O usuário seleciona uma pasta raiz via Tkinter.
-    *   A classe `FileArchiver` é instanciada, definindo `watch_folder` e `archive_root` como a mesma pasta selecionada, e `log_folder` como `os.path.join(watch_folder, "ERROS")`.
-    *   O sistema de logging é configurado.
-2.  **Processamento Recursivo:**
-    *   O método `process_files()` inicia o processo na `watch_folder`.
-    *   O método `process_folder()` é chamado recursivamente para cada subpasta encontrada (que não seja ignorada).
-    *   Para cada arquivo encontrado em uma pasta:
-        *   Se for `.eml`, chama `process_eml_file()`.
-        *   Se for outro tipo, chama `process_other_file()`.
-3.  **Processamento de Arquivo Individual:**
-    *   Extrai a data (do cabeçalho `.eml` ou metadados do arquivo).
-    *   Determina a pasta de destino (`Ano/Ano-Mês`).
-    *   Verifica se o arquivo já está no local correto; se sim, pula para o próximo.
-    *   Cria a pasta de destino se necessário.
-    *   Sanitiza e trunca o nome do arquivo.
-    *   Resolve conflitos de nome, gerando um nome final único.
-    *   Move o arquivo usando `shutil.move()`.
-    *   Registra sucesso no console ou falha no log.
-4.  **Finalização:**
-    *   Após percorrer todas as pastas e arquivos, exibe mensagem de conclusão.
-    *   Verifica se o arquivo de log foi criado e informa o usuário.
-
-## Mecanismos de Segurança e Robustez
-
-*   **Tratamento de Exceções em Múltiplas Camadas:** Blocos `try-except` em níveis de pasta, arquivo, leitura, parsing e movimentação garantem que falhas isoladas não interrompam o processo geral.
-*   **Estratégias de Fallback para Parsing de Data:** Múltiplas tentativas para extrair datas de emails aumentam a chance de sucesso.
-*   **Verificações de Integridade:** Confirmações de existência de pastas, acessibilidade de arquivos e validação de nomes antes de operações críticas. Prevenção de sobrescrita acidental via resolução de conflitos.
-
-## Otimizações e Eficiência
-
-*   **Prevenção de Movimentações Desnecessárias:** A verificação `if current_folder_abs == target_folder_abs:` evita I/O desnecessário.
-*   **Logging Seletivo:** Focar em `logging.ERROR` reduz o overhead de escrita em disco e facilita a análise de problemas.
-*   **Ignorância Seletiva:** Pular arquivos `.ffs_db` e pastas específicas evita processamento inútil.
-
-## Considerações Técnicas Avançadas
-
-*   **Interface Gráfica Mínima:** Tkinter é usado apenas para a seleção inicial da pasta.
-*   **Tratamento de Codificações:** Tentativa de `UTF-8` e fallback para `Latin-1` em arquivos `.eml`.
-*   **Normalização de Caminhos:** Uso de `os.path.normpath(os.path.abspath(...))` para comparações confiáveis de caminhos.
-*   **Feedback em Tempo Real:** Mensagens no console informam sobre arquivos movidos e pastas criadas.
-*   **Geração de Nomes Únicos:** Uso de timestamps de alta precisão como fallback na resolução de conflitos.
-
-## Diferenças Chave em Relação a Outros Scripts Similares
-
-*   **Mesmo Diretório para Origem e Destino:** A pasta selecionada é tanto a fonte dos arquivos quanto a raiz onde a estrutura `Ano/Ano-Mês` será criada.
-*   **Processamento *In-Place*:** Reorganiza os arquivos dentro da própria estrutura de pastas existente, em vez de movê-los para um local de arquivamento externo.
-*   **Navegação Recursiva:** Projetado especificamente para processar arquivos em todas as subpastas da raiz selecionada, não apenas os arquivos diretamente na raiz.
-
-## Casos de Uso Ideais
-
-*   Reorganização de uma estrutura de pastas existente e desorganizada contendo emails e documentos acumulados.
-*   Consolidação de backups de emails ou arquivos dispersos em múltiplas subpastas dentro de um mesmo diretório raiz.
-*   Preparação de arquivos históricos localizados em subpastas para arquivamento de longo prazo com estrutura cronológica.
-*   Limpeza e organização de estruturas de pastas complexas com preservação da cronologia original dos arquivos.
-
-## Limitações e Possíveis Melhorias
-
-*   **Ausência de Barra de Progresso:** Para diretórios muito grandes, não há indicação visual do progresso além das mensagens de console.
-*   **Sem Opção de Simulação:** Não existe um modo "dry run" que permitiria visualizar as mudanças sem executá-las.
-*   **Ausência de Remoção de Pastas Vazias:** O script não remove automaticamente as pastas que ficam vazias após a movimentação dos arquivos.
-*   **Limitações na Paralelização:** O processamento é sequencial, o que pode ser ineficiente para volumes muito grandes de arquivos em sistemas com múltiplos núcleos.
-*   **Configuração Fixa de Pastas Ignoradas:** As pastas a serem ignoradas estão codificadas no script; poderia ser mais flexível (ex: via arquivo de configuração).
-
-## Conclusão
-
-Este script representa uma solução robusta e bem pensada para o desafio específico de reorganizar *in-place* arquivos dispersos em múltiplas subpastas, transformando uma estrutura potencialmente caótica em uma hierarquia cronológica navegável. Sua atenção especial à integridade dos dados, tratamento de exceções, resolução de conflitos de nome e processamento recursivo o tornam uma ferramenta confiável para gerenciar arquivos históricos dentro de sua localização original.
+*   **Linguagem:** Python 3.x
+*   **Interface Gráfica (GUI):** Tkinter (módulo padrão) para seleção de pasta e mensagens informativas/resumo.
+*   **Dependências:** Utiliza apenas módulos padrão do Python: `os`, `shutil`, `email`, `logging`, `re`, `datetime`, `tkinter`.
+*   **Escopo:** Processa a pasta selecionada e todas as suas subpastas recursivamente.
+*   **Organização:** *In-place* (move arquivos para `YYYY/YYYY-MM` dentro da pasta raiz selecionada).
+*   **Itens Ignorados:** Pastas `ERROS`, `anos anteriores` (case-insensitive); arquivos `.ffs_db`.
+*   **Fonte da Data:** Cabeçalho `Date` para `.eml` (com fallback para data atual + erro logado); Data de modificação (`os.path.getmtime`) para outros arquivos (erro logado se falhar).
+*   **Codificação `.eml`:** Tenta UTF-8, depois Latin-1.
+*   **Limite de Caminho:** Tenta manter o caminho completo abaixo de 245 caracteres (`MAX_PATH_LENGTH` - `SAFE_FILENAME_MARGIN`) através de truncamento inteligente (UTF-8 aware).
+*   **Logging:** Registra apenas `ERROR` level no arquivo `ERROS/archive_failures_YYYYMMDDHHMMSS.log`.
+*   **Saída:** Estrutura de pastas organizada, arquivo de log (se houver erros), janela de resumo.
