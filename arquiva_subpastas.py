@@ -1,21 +1,26 @@
 import shutil
 import email
+import os  # Adicionado para os.walk
 import logging
 import re
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, List
-import tkinter as tk_module # Alias to avoid conflict
+import tkinter as tk_module  # Alias to avoid conflict
 from tkinter import filedialog, messagebox
 
 # --- Constantes ---
-EFFECTIVE_MAX_PATH = 259  # Limite prático para caminhos no Windows (MAX_PATH (260) - 1 para nulo)
+# Limite prático para caminhos no Windows (MAX_PATH (260) - 1 para nulo)
+EFFECTIVE_MAX_PATH = 259
 SAFE_PATH_MARGIN = 10     # Margem de segurança para evitar atingir o limite exato
-LOG_FOLDER_NAME = "ERROS" # Nome da pasta de logs
+LOG_FOLDER_NAME = "ERROS"  # Nome da pasta de logs
 FALLBACK_SANITIZED_FILENAME = "arquivo_renomeado"
-MAX_DUPLICATE_RESOLUTION_ATTEMPTS = 10 # Máximo de tentativas para resolver nomes duplicados
-LOG_FILENAME_PREFIX = "archive_failures_subfolders_" # Prefixo específico para este script
-DEFAULT_EXCLUDED_FOLDERS = ["anos anteriores", "erros"] # Nomes de pastas a ignorar (em minúsculas)
+# Máximo de tentativas para resolver nomes duplicados
+MAX_DUPLICATE_RESOLUTION_ATTEMPTS = 10
+# Prefixo específico para este script
+LOG_FILENAME_PREFIX = "archive_failures_subfolders_"
+# Nomes de pastas a ignorar (em minúsculas)
+DEFAULT_EXCLUDED_FOLDERS = ["anos anteriores", "erros"]
 # --- Fim Constantes ---
 
 
@@ -33,16 +38,19 @@ class FileArchiver:
             log_folder_name: Nome da pasta de log (será criada dentro de archive_root_str).
         """
         self.watch_folder: Path = Path(watch_folder_str).resolve()
-        self.archive_root: Path = Path(archive_root_str).resolve() # Geralmente o mesmo que watch_folder
+        # Geralmente o mesmo que watch_folder
+        self.archive_root: Path = Path(archive_root_str).resolve()
         self.log_folder: Path = self.archive_root / log_folder_name
         self.setup_logger()
-        self.excluded_folders_lower: List[str] = [f.lower() for f in DEFAULT_EXCLUDED_FOLDERS]
+        self.excluded_folders_lower: List[str] = [
+            f.lower() for f in DEFAULT_EXCLUDED_FOLDERS]
 
         # --- Counters and Summary ---
         self.moved_files_count = 0
         self.renamed_in_place_count = 0
         self.error_count = 0
         self.created_folders_count = 0
+        self.deleted_empty_folders_count = 0  # Novo contador
         self.summary_message = ""
         # --- End Counters and Summary ---
 
@@ -52,7 +60,8 @@ class FileArchiver:
             self.log_folder.mkdir(parents=True, exist_ok=True)
 
             timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-            log_file = self.log_folder / f"{LOG_FILENAME_PREFIX}{timestamp}.log"
+            log_file = self.log_folder / \
+                f"{LOG_FILENAME_PREFIX}{timestamp}.log"
 
             self.logger = logging.getLogger(
                 f"{__name__}.subpastas.{id(self)}")  # Unique logger name
@@ -79,10 +88,10 @@ class FileArchiver:
             self.logger = logging.getLogger(f'null_subpastas.{id(self)}')
             if not self.logger.hasHandlers():
                 self.logger.addHandler(logging.NullHandler())
-            try: # Tenta logar o erro crítico se o logger, mesmo nulo, permitir
+            try:  # Tenta logar o erro crítico se o logger, mesmo nulo, permitir
                 self.logger.error(critical_error_msg)
-            except Exception: # pylint: disable=broad-except
-                pass # Ignora se nem isso funcionar
+            except Exception:  # pylint: disable=broad-except
+                pass  # Ignora se nem isso funcionar
             self.error_count += 1
 
     def process_files_recursively(self) -> None:
@@ -106,15 +115,22 @@ class FileArchiver:
         self.moved_files_count = 0
         self.renamed_in_place_count = 0
         self.created_folders_count = 0
+        self.deleted_empty_folders_count = 0  # Resetar contador para a execução
         # Não resetar self.error_count totalmente para manter erros de setup do logger
 
         self.process_folder(self.watch_folder)
-        self.error_count = initial_error_count + (self.error_count - initial_error_count) # Garante que erros de processamento sejam somados
+        # Garante que erros de processamento sejam somados
+        self.error_count = initial_error_count + \
+            (self.error_count - initial_error_count)
+
+        # --- Apagar pastas vazias ---
+        self._delete_empty_folders(self.watch_folder)
+        # --- Fim Apagar pastas vazias ---
 
         # --- Generate Summary Message ---
         summary = "-" * 30 + "\n"
         actions_taken = False
-        if self.moved_files_count > 0 or self.renamed_in_place_count > 0 or self.created_folders_count > 0:
+        if self.moved_files_count > 0 or self.renamed_in_place_count > 0 or self.created_folders_count > 0 or self.deleted_empty_folders_count > 0:
             summary += f"Processamento concluído:\n"
             actions_taken = True
             if self.moved_files_count > 0:
@@ -123,6 +139,8 @@ class FileArchiver:
                 summary += f"- {self.renamed_in_place_count} arquivos renomeados (sanitizados/truncados) no local.\n"
             if self.created_folders_count > 0:
                 summary += f"- {self.created_folders_count} novas pastas de ano/mês criadas.\n"
+            if self.deleted_empty_folders_count > 0:
+                summary += f"- {self.deleted_empty_folders_count} pastas vazias foram removidas.\n"
         else:
             if self.error_count == 0:
                 summary += "Nenhum arquivo precisou ser movido ou renomeado. Organização e nomes já estavam corretos.\n"
@@ -140,7 +158,7 @@ class FileArchiver:
     def process_folder(self, current_folder_path: Path) -> None:
         """Processa recursivamente os itens em uma pasta."""
         try:
-            if not current_folder_path.is_dir(): # Verificação extra
+            if not current_folder_path.is_dir():  # Verificação extra
                 self.logger.error(
                     f"{current_folder_path} - Motivo: Pasta não encontrada ou não é um diretório.")
                 self.error_count += 1
@@ -151,9 +169,9 @@ class FileArchiver:
                     if item_path.is_dir():
                         if item_path.name.lower() not in self.excluded_folders_lower and \
                            item_path.resolve() != self.log_folder.resolve():
-                            self.process_folder(item_path) # Chamada recursiva
+                            self.process_folder(item_path)  # Chamada recursiva
                     elif item_path.is_file():
-                        if item_path.name.lower().endswith(".ffs_db"): # Ignora .ffs_db
+                        if item_path.name.lower().endswith(".ffs_db") or item_path.name.lower().endswith(".ffs_lock"):  # Ignora .ffs_db
                             continue
                         self.process_file(item_path)
                 except OSError as e_item:
@@ -205,12 +223,12 @@ class FileArchiver:
                 f"{eml_path.name} - Motivo: Arquivo não encontrado (pode ter sido movido/excluído).")
             self.error_count += 1
             return
-        except OSError as e: # Erros de permissão, etc.
+        except OSError as e:  # Erros de permissão, etc.
             self.logger.error(
                 f"{eml_path.name} - Motivo: Erro de sistema ao ler o arquivo. Detalhes: {e}")
             self.error_count += 1
             return
-        except Exception as e: # Outros erros de leitura
+        except Exception as e:  # Outros erros de leitura
             self.logger.error(
                 f"{eml_path.name} - Motivo: Falha genérica ao ler o arquivo. Detalhes: {e}")
             self.error_count += 1
@@ -250,8 +268,10 @@ class FileArchiver:
         ]
 
         try:
-            cleaned_date_str_util = re.sub(r'\s*\([^)]*\)\s*$', '', date_str).strip()
-            parsed_dt = email.utils.parsedate_to_datetime(cleaned_date_str_util)
+            cleaned_date_str_util = re.sub(
+                r'\s*\([^)]*\)\s*$', '', date_str).strip()
+            parsed_dt = email.utils.parsedate_to_datetime(
+                cleaned_date_str_util)
             if parsed_dt:
                 return parsed_dt
         except Exception:
@@ -259,7 +279,8 @@ class FileArchiver:
 
         for fmt in formats_to_try:
             try:
-                cleaned_date_str_strptime = re.sub(r'\s*\([^)]*\)\s*$', '', date_str).strip()
+                cleaned_date_str_strptime = re.sub(
+                    r'\s*\([^)]*\)\s*$', '', date_str).strip()
                 return datetime.strptime(cleaned_date_str_strptime, fmt)
             except ValueError:
                 continue
@@ -309,16 +330,16 @@ class FileArchiver:
             try:
                 number = int(number_str)
                 sanitized = str(number) + rest_of_name
-            except ValueError: # Para números muito grandes
+            except ValueError:  # Para números muito grandes
                 if len(number_str) > 1 and number_str.startswith('0'):
                     sanitized = number_str.lstrip('0') + rest_of_name
                 else:
                     sanitized = number_str + rest_of_name
-        
+
         if not sanitized:
             self.logger.error(
                 f"Nome do arquivo '{filename}' resultou em vazio após sanitização. Usando fallback '{FALLBACK_SANITIZED_FILENAME}'.")
-            self.error_count +=1 # Considerar erro se o nome se tornar vazio
+            self.error_count += 1  # Considerar erro se o nome se tornar vazio
             sanitized = FALLBACK_SANITIZED_FILENAME
         return sanitized
 
@@ -335,7 +356,8 @@ class FileArchiver:
         len_of_separator = 1
         len_of_extension = len(ext)
 
-        available_len_for_base = max_full_path_len - (len_of_folder_path_str + len_of_separator + len_of_extension)
+        available_len_for_base = max_full_path_len - \
+            (len_of_folder_path_str + len_of_separator + len_of_extension)
 
         if available_len_for_base <= 0:
             self.logger.error(
@@ -344,16 +366,19 @@ class FileArchiver:
             self.error_count += 1
             # Tenta um fallback mínimo
             if len(ext) < max_full_path_len - (len_of_folder_path_str + len_of_separator):
-                minimal_base_len = max_full_path_len - (len_of_folder_path_str + len_of_separator + len_of_extension)
-                if minimal_base_len < 1 and len(base) > 0: return f"_{ext}" if ext else "_"
-                if minimal_base_len < 1 and len(base) == 0: return "_"
-            return filename # Retorna original se o fallback também falhar
+                minimal_base_len = max_full_path_len - \
+                    (len_of_folder_path_str + len_of_separator + len_of_extension)
+                if minimal_base_len < 1 and len(base) > 0:
+                    return f"_{ext}" if ext else "_"
+                if minimal_base_len < 1 and len(base) == 0:
+                    return "_"
+            return filename  # Retorna original se o fallback também falhar
 
         if available_len_for_base < len(base):
             # self.logger.warning(f"Nome truncado: '{filename}' -> '{base[:available_len_for_base]}{ext}' em '{target_folder}'") # Opcional
             return f"{base[:available_len_for_base]}{ext}"
-        
-        return filename # Não precisou truncar a base
+
+        return filename  # Não precisou truncar a base
 
     def move_file_to_archive(self, source_path: Path, target_destination_folder: Path) -> None:
         """
@@ -366,14 +391,15 @@ class FileArchiver:
         created_folders_this_call = 0
         try:
             if not target_destination_folder.parent.exists() and target_destination_folder.parent != self.archive_root:
-                target_destination_folder.parent.mkdir(parents=True, exist_ok=True)
+                target_destination_folder.parent.mkdir(
+                    parents=True, exist_ok=True)
                 self.created_folders_count += 1
-                created_folders_this_call +=1
-            
+                created_folders_this_call += 1
+
             if not target_destination_folder.exists():
                 target_destination_folder.mkdir(parents=True, exist_ok=True)
                 if created_folders_this_call == 0 or target_destination_folder.parent != self.archive_root:
-                     self.created_folders_count += 1
+                    self.created_folders_count += 1
         except OSError as e:
             self.logger.error(
                 f"{source_path.name} - Motivo: Erro ao criar pasta de destino '{target_destination_folder}'. Detalhes: {e}")
@@ -383,7 +409,7 @@ class FileArchiver:
         original_filename = source_path.name
         sanitized_filename = self._sanitize_filename(original_filename)
         max_allowed_path = EFFECTIVE_MAX_PATH - SAFE_PATH_MARGIN
-        
+
         desired_filename_in_target = self._truncate_filename(
             target_destination_folder, sanitized_filename, max_allowed_path)
 
@@ -393,21 +419,22 @@ class FileArchiver:
 
         # Loop para resolver conflitos se o destino existe E NÃO é o mesmo arquivo de origem
         while destination_path.exists() and not source_path.samefile(destination_path) \
-              and num_attempts < MAX_DUPLICATE_RESOLUTION_ATTEMPTS:
+                and num_attempts < MAX_DUPLICATE_RESOLUTION_ATTEMPTS:
             num_attempts += 1
-            if num_attempts == 1: # Loga apenas na primeira tentativa
+            if num_attempts == 1:  # Loga apenas na primeira tentativa
                 self.logger.error(
                     f"{source_path.name} - Motivo: Conflito com arquivo existente em '{target_destination_folder}' para nome '{desired_filename_in_target}'. Tentando renomear.")
-            
-            base_name_orig, ext_orig = Path(desired_filename_in_target).stem, Path(desired_filename_in_target).suffix
-            if not base_name_orig: # Caso o nome original seja apenas uma extensão ou vazio
+
+            base_name_orig, ext_orig = Path(desired_filename_in_target).stem, Path(
+                desired_filename_in_target).suffix
+            if not base_name_orig:  # Caso o nome original seja apenas uma extensão ou vazio
                 base_name_orig = FALLBACK_SANITIZED_FILENAME.split('.')[0]
 
-            if num_attempts <= MAX_DUPLICATE_RESOLUTION_ATTEMPTS / 2: # Tenta com contador primeiro
+            if num_attempts <= MAX_DUPLICATE_RESOLUTION_ATTEMPTS / 2:  # Tenta com contador primeiro
                 name_with_counter = f"{base_name_orig}_{num_attempts}{ext_orig}"
                 current_target_filename = self._truncate_filename(
                     target_destination_folder, name_with_counter, max_allowed_path)
-            else: # Depois tenta com timestamp
+            else:  # Depois tenta com timestamp
                 timestamp = datetime.now().strftime("%Y%m%d%H%M%S%f")
                 name_with_timestamp = f"{base_name_orig}_{timestamp}{ext_orig}"
                 current_target_filename = self._truncate_filename(
@@ -427,7 +454,7 @@ class FileArchiver:
             return
 
         try:
-            if not source_path.exists(): # Re-check source existence
+            if not source_path.exists():  # Re-check source existence
                 self.logger.warning(
                     f"{source_path.name} - Arquivo de origem desapareceu antes da ação final para '{destination_path}'.")
                 return
@@ -439,10 +466,53 @@ class FileArchiver:
                 shutil.move(str(source_path), str(destination_path))
                 self.moved_files_count += 1
         except Exception as e:
-            action_verb = "renomear" if source_path.parent.resolve() == destination_path.parent.resolve() else "mover"
+            action_verb = "renomear" if source_path.parent.resolve(
+            ) == destination_path.parent.resolve() else "mover"
             self.logger.error(
                 f"{source_path.name} - Motivo: Falha ao {action_verb} para '{destination_path}'. Detalhes: {e}")
             self.error_count += 1
+
+    def _delete_empty_folders(self, folder_to_scan: Path) -> None:
+        """
+        Remove subpastas vazias dentro de folder_to_scan.
+        Itera de baixo para cima, não remove folder_to_scan, archive_root, log_folder ou pastas excluídas.
+        """
+        if not folder_to_scan.is_dir():
+            return
+
+        # Itera das pastas mais profundas para as mais superficiais
+        for dirpath_str, _, _ in os.walk(str(folder_to_scan), topdown=False):
+            current_dir = Path(dirpath_str)
+
+            # Proteções:
+            # 1. Não deletar a pasta raiz da varredura.
+            # 2. Não deletar a pasta raiz de arquivamento.
+            # 3. Não deletar a pasta de log ativa.
+            # 4. Não deletar pastas cujos nomes estão na lista de exclusão.
+            if current_dir.resolve() == folder_to_scan.resolve() or \
+               current_dir.resolve() == self.archive_root.resolve() or \
+               current_dir.resolve() == self.log_folder.resolve() or \
+               current_dir.name.lower() in self.excluded_folders_lower:
+                continue
+
+            try:
+                # Verifica se o diretório está realmente vazio
+                if not any(current_dir.iterdir()):
+                    try:
+                        current_dir.rmdir()
+                        self.deleted_empty_folders_count += 1
+                        # self.logger.info(f"Pasta vazia removida: {current_dir}") # Log opcional
+                    except OSError as e:
+                        self.logger.error(
+                            f"Não foi possível remover a pasta vazia '{current_dir}'. Detalhes: {e}")
+                        self.error_count += 1
+            # A pasta pode ter sido removida em uma iteração anterior (filha)
+            except FileNotFoundError:
+                continue
+            except OSError as e:  # Erro ao listar o conteúdo da pasta
+                self.logger.error(
+                    f"Erro ao acessar '{current_dir}' para verificar se está vazia. Detalhes: {e}")
+                self.error_count += 1
 
 
 def select_folder() -> Optional[str]:
@@ -476,7 +546,7 @@ def show_auto_close_message(message: str, timeout: int) -> None:
     frame.pack(fill=tk_module.BOTH, expand=True)
 
     countdown_var = tk_module.StringVar()
-    
+
     title_label = tk_module.Label(
         frame, text="Processamento Concluído", font=("Arial", 14, "bold"))
     title_label.pack(pady=(0, 10))
@@ -503,18 +573,20 @@ def show_auto_close_message(message: str, timeout: int) -> None:
     msg_text.pack(side=tk_module.LEFT, fill=tk_module.BOTH, expand=True)
     scrollbar.config(command=msg_text.yview)
 
-    countdown_label = tk_module.Label(frame, textvariable=countdown_var, fg="gray")
+    countdown_label = tk_module.Label(
+        frame, textvariable=countdown_var, fg="gray")
     countdown_label.pack(pady=(10, 0))
 
     close_button = tk_module.Button(frame, text="Fechar Agora",
-                             command=msg_root.destroy, width=15)
+                                    command=msg_root.destroy, width=15)
     close_button.pack(pady=10)
 
     def update_countdown(remaining: int) -> None:
         if not msg_root.winfo_exists():
             return
         if remaining <= 0:
-            if msg_root.winfo_exists(): msg_root.destroy()
+            if msg_root.winfo_exists():
+                msg_root.destroy()
             return
         countdown_var.set(f"Esta janela fechará em {remaining} segundos")
         if msg_root.winfo_exists():
@@ -543,7 +615,7 @@ def main() -> None:
         return
 
     watch_folder_path = Path(watch_folder_str)
-    archive_root_path = watch_folder_path # Arquiva dentro da própria estrutura
+    archive_root_path = watch_folder_path  # Arquiva dentro da própria estrutura
     log_folder_display_path = archive_root_path / LOG_FOLDER_NAME
 
     temp_root = tk_module.Tk()
@@ -563,7 +635,7 @@ def main() -> None:
     if archiver.log_folder.exists():
         try:
             log_files_found = sorted(
-                [f for f in archiver.log_folder.iterdir() if f.is_file() and \
+                [f for f in archiver.log_folder.iterdir() if f.is_file() and
                  f.name.startswith(LOG_FILENAME_PREFIX) and f.name.endswith(".log")],
                 reverse=True
             )
@@ -579,7 +651,7 @@ def main() -> None:
     elif archiver.error_count > 0:
         final_message += f"\nForam encontrados {archiver.error_count} erros, mas o arquivo de log pode não ter sido criado corretamente em '{archiver.log_folder}'."
 
-    show_auto_close_message(final_message, 7000) # 7 segundos
+    show_auto_close_message(final_message, 7000)  # 7 segundos
 
 
 if __name__ == "__main__":

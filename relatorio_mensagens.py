@@ -8,7 +8,7 @@ from datetime import datetime
 import markdown  # Necessário para ReportCombiner
 
 # --- Constantes ---
-ICON_PATH = 'imagens/msg.ico'
+ICON_PATH = 'imagens/email.ico'
 REPORT_FILENAME_TEMPLATE = "relatorio_verificacao_{}.txt"
 
 # --- Constantes para ReportCombiner ---
@@ -174,7 +174,7 @@ class ReportCombiner:
 
     def save_html_report(self, html_content: str) -> bool:
         """Salva o conteúdo HTML em um arquivo."""
-        output_filename = f"Relatorio_{self.folder_path.name}.html"
+        output_filename = f"{self.folder_path.name} - Relatório dos Backups de Mensagens.html"
         self.output_html_path = self.folder_path / output_filename
         self.logger.info(
             f"Escrevendo o arquivo HTML combinado em: {self.output_html_path}")

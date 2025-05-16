@@ -1,4 +1,4 @@
-# Comparador de Conteúdo de Pastas (`pastas_diff.py`)
+# Comparador de Conteúdo de Pastas (`pastas_diff.exe`)
 
 ## 1. Objetivo
 
@@ -27,6 +27,7 @@ Este script Python tem como objetivo comparar o conteúdo (lista de arquivos) de
 ## 3. Modo de Usar
 
 1.  **Execute o Script:** Certifique-se de ter o Python 3 instalado. Execute o script `pastas_diff.py` (por exemplo, clicando duas vezes nele ou rodando `python pastas_diff.py` no terminal).
+1.  **Execute o Programa:** Execute o arquivo `pastas_diff.exe` (ou o nome que o executável recebeu).
 2.  **Selecione a Primeira Pasta:** Uma janela de diálogo do sistema operacional será aberta com o título "Selecione a primeira pasta". Navegue até a primeira pasta que você deseja comparar e clique em "Selecionar pasta" (ou o botão equivalente).
 3.  **Selecione a Segunda Pasta:** Outra janela de diálogo aparecerá com o título "Selecione a segunda pasta". Navegue até a segunda pasta que você deseja comparar e clique em "Selecionar pasta".
 4.  **Aguarde a Comparação:** O script listará os arquivos em ambas as estruturas de pastas e realizará a comparação. O tempo de execução dependerá do número de arquivos em cada pasta. Mensagens de progresso podem aparecer no console onde o script foi executado.
@@ -36,9 +37,9 @@ Este script Python tem como objetivo comparar o conteúdo (lista de arquivos) de
 
 ## 4. Especificações Técnicas
 
-*   **Linguagem:** Python 3.x
+*   **Tipo:** Executável para Windows (gerado a partir de Python 3.x).
 *   **Interface Gráfica (GUI):** Tkinter (módulo padrão) para seleção de pastas (`filedialog`) e exibição de mensagens (`messagebox`).
-*   **Dependências:** Utiliza apenas módulos padrão do Python: `os`, `tkinter`, `logging`, `datetime`.
+*   **Dependências:** Nenhuma instalação adicional é necessária para executar o arquivo `.exe`, pois todas as dependências (como Python e bibliotecas necessárias) estão empacotadas nele.
 *   **Escopo da Comparação:** Recursiva (inclui subpastas).
 *   **Método de Comparação:** Baseado na presença/ausência de arquivos com o mesmo caminho relativo em ambas as pastas. **Não compara o conteúdo** dos arquivos.
 *   **Itens Ignorados:** Arquivos `.ffs_db` (case-insensitive).

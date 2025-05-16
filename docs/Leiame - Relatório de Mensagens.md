@@ -1,4 +1,4 @@
-# Verificador de Sequência Numérica e Unificador de Relatórios (`relatorio_mensagens.py`)
+# Verificador de Sequência Numérica e Unificador de Relatórios (`relatorio_mensagens.exe`)
 
 ## 1. Objetivo
 
@@ -40,6 +40,7 @@ Este script Python, com interface gráfica (GUI), tem como objetivos principais:
 ## 3. Modo de Usar
 
 1.  **Execute o Script:** Certifique-se de ter o Python 3 instalado e a biblioteca `markdown` (`pip install markdown`). Execute o script `relatorio_mensagens.py` (por exemplo, clicando duas vezes nele ou rodando `python relatorio_mensagens.py` no terminal).
+1.  **Execute o Programa:** Execute o arquivo `relatorio_mensagens.exe` (ou o nome que o executável recebeu).
 2.  **Selecione a Pasta:** Na janela do programa, clique no botão "Selecionar". Navegue até a pasta que contém os arquivos que você deseja verificar e clique em "Selecionar pasta" (ou o botão equivalente). O caminho da pasta aparecerá no campo "Pasta:".
 3.  **Defina o Intervalo:**
     *   No campo "Número Inicial:", digite o primeiro número da sequência que você espera encontrar (ex: `1`).
@@ -56,11 +57,9 @@ Este script Python, com interface gráfica (GUI), tem como objetivos principais:
 
 ## 4. Especificações Técnicas
 
-*   **Linguagem:** Python 3.x
+*   **Tipo:** Executável para Windows (gerado a partir de Python 3.x).
 *   **Interface Gráfica (GUI):** Tkinter (módulo padrão do Python)
-*   **Dependências:**
-    *   Módulos padrão do Python: `re`, `tkinter`, `pathlib`, `logging`, `datetime`.
-    *   Biblioteca externa: `markdown` (necessária para a unificação de relatórios em HTML). Instale com `pip install markdown`.
+*   **Dependências:** Nenhuma instalação adicional é necessária para executar o arquivo `.exe`, pois todas as dependências (como Python e bibliotecas necessárias, incluindo `markdown`) estão empacotadas nele.
 *   **Escopo da Análise de Sequência:** A verificação de sequência numérica analisa **apenas** os arquivos localizados diretamente na pasta selecionada. Ela **não** verifica arquivos em subpastas.
 *   **Escopo da Unificação de Relatórios:** A unificação processa todos os arquivos `.txt` encontrados diretamente na **pasta mãe** da pasta selecionada para análise de sequência.
 *   **Extração de Números:** Considera apenas dígitos (`0-9`) que aparecem no **início** do nome do arquivo. A extração para ao encontrar o primeiro caractere não numérico. Zeros à esquerda são ignorados na conversão para número inteiro (ex: `007` é tratado como `7`).
@@ -69,4 +68,3 @@ Este script Python, com interface gráfica (GUI), tem como objetivos principais:
     *   **Relatório Unificado (Opcional):** Salvo como um arquivo `.html` na **pasta mãe** da pasta analisada, com o nome no formato `Relatorio_Unificado_[nome_da_pasta_mae].html`, codificado em UTF-8.
     *   **Logs da Unificação (Opcional):** Arquivos `.log` salvos na subpasta `LOGS_UNIFICADOR` dentro da pasta mãe, caso a unificação seja executada.
 *   **Exclusão de Arquivos:** Se a unificação de relatórios for bem-sucedida, os arquivos `.txt` originais que foram combinados no relatório HTML são excluídos da pasta mãe.
-

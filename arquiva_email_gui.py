@@ -5,11 +5,10 @@ import logging
 import re
 from datetime import datetime
 import tkinter as tk
-# Added messagebox for potential future use, though not strictly needed now
 from tkinter import filedialog, messagebox
 
 # Definir constantes do arquiva_email.py (ou arquiva_raiz.py)
-MAX_PATH_LENGTH = 255
+MAX_PATH_LENGTH = 259
 SAFE_FILENAME_MARGIN = 10
 
 
@@ -19,12 +18,9 @@ class FileArchiver:
         self.archive_root = archive_root
         self.log_folder = log_folder
         self.setup_logger()
-        # --- Adicionado contadores ---
         self.processed_files_count = 0
         self.error_count = 0
-        # Para evitar prints repetidos de criação de pasta (agora removidos)
         self.created_folders = set()
-        # --- Fim Adicionado contadores ---
 
     def setup_logger(self):
         """Configura o logger para registrar apenas erros."""
@@ -75,7 +71,8 @@ class FileArchiver:
 
         files_to_process = [f for f in os.listdir(self.watch_folder)
                             if os.path.isfile(os.path.join(self.watch_folder, f))
-                            and not f.lower().endswith(".ffs_db")]  # Ignora .ffs_db
+                            # Ignora .ffs_db e _lock
+                            and not (f.lower().endswith(".ffs_db") or f.lower().endswith(".ffs_lock"))]
 
         if not files_to_process:
             # Se não há arquivos, não há o que processar (não é um erro)
@@ -248,7 +245,6 @@ class FileArchiver:
             sanitized = "arquivo_renomeado"  # Ou gerar um nome único com timestamp
         # Não loga mais a sanitização
         return sanitized
-
 
     def _truncate_filename(self, folder_path, filename, max_len):
         """Trunca o nome do arquivo se o caminho completo exceder max_len."""
@@ -470,7 +466,6 @@ def show_auto_close_message(message, timeout):
 
     # Iniciar loop principal
     root.mainloop()
-
 
 
 def main():

@@ -1,4 +1,4 @@
-# Renomeador de Arquivos EML (`renomear_eml.py`)
+# Renomeador de Arquivos EML (`renomear_eml.exe`)
 
 ## 1. Objetivo
 
@@ -51,7 +51,7 @@ Este script Python, com interface gráfica para seleção de pasta, tem como obj
 
 ## 3. Modo de Usar
 
-1.  **Execute o Script:** Certifique-se de ter o Python 3 instalado. Execute o script `renomear_eml.py` (por exemplo, clicando duas vezes nele ou rodando `python renomear_eml.py` no terminal).
+1.  **Execute o Programa:** Execute o arquivo `renomear_eml.exe` (ou o nome que o executável recebeu).
 2.  **Selecione a Pasta:** Uma janela de diálogo do sistema operacional será aberta. Navegue até a pasta que contém os arquivos `.eml` que você deseja renomear e clique em "Selecionar pasta" (ou o botão equivalente).
 3.  **Aguarde o Processamento:** O script começará a analisar cada arquivo `.eml` na pasta selecionada. O progresso, incluindo quais arquivos estão sendo processados, renomeados, movidos ou apresentando erros, será exibido no console/terminal onde o script foi iniciado.
 4.  **Verifique o Resumo:** Ao final do processo, uma janela pop-up aparecerá com um resumo das operações realizadas (quantos arquivos foram renomeados, movidos para `Duplicatas`, movidos para `Problemas`, ignorados e quantos erros ocorreram). Clique em "OK" para fechar a janela.
@@ -60,12 +60,11 @@ Este script Python, com interface gráfica para seleção de pasta, tem como obj
     *   Se a subpasta `Duplicatas` foi criada, verifique seu conteúdo. Ela conterá arquivos que teriam o mesmo nome de outros após a renomeação.
     *   Se a subpasta `Problemas` foi criada, verifique seu conteúdo. Ela conterá arquivos que não puderam ser lidos ou processados corretamente. O nome desses arquivos incluirá "ERRO_LEITURA" e uma data de fallback.
     *   Consulte o console/terminal para obter detalhes sobre avisos ou erros específicos que ocorreram durante o processo.
-
 ## 4. Especificações Técnicas
 
-*   **Linguagem:** Python 3.x
+*   **Tipo:** Executável para Windows (gerado a partir de Python 3.x).
 *   **Interface Gráfica (GUI):** Tkinter (módulo padrão) para seleção de pasta (`filedialog`) e mensagem de resumo (`messagebox`).
-*   **Dependências:** Utiliza apenas módulos padrão do Python: `os`, `tkinter`, `email` (incluindo `policy`, `header`, `utils`), `datetime`, `re`, `shutil`, `sys`.
+*   **Dependências:** Nenhuma instalação adicional é necessária para executar o arquivo `.exe`, pois todas as dependências (como Python e bibliotecas padrão necessárias) estão empacotadas nele.
 *   **Escopo:** Processa apenas arquivos `.eml` (case-insensitive) localizados **diretamente** na pasta selecionada. Não processa subpastas.
 *   **Codificação de Leitura:** Tenta ler `.eml` como binário (com `policy.default`), depois como texto UTF-8 (ignorando erros), e como texto Latin-1 (ignorando erros).
 *   **Formato do Nome:** `YYYY MM DD HHMMSS - AssuntoSanitizado - RemetenteSanitizado.eml`

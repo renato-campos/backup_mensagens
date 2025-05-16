@@ -14,8 +14,8 @@ O `arquiva_email_gui.py` é uma ferramenta especializada para organização auto
 ## Modo de Usar
 
 1. **Execução do Programa**:
-   - Execute o script `arquiva_email_gui.py` com Python
-   - Uma janela de diálogo será exibida solicitando a seleção da pasta a ser processada
+   - Execute o arquivo `arquiva_email_gui.exe` (ou o nome que o executável recebeu).
+   - Uma mensagem informativa inicial será exibida, seguida por uma janela de diálogo para seleção da pasta.
 
 2. **Seleção da Pasta**:
    - Selecione a pasta que contém os arquivos a serem organizados
@@ -24,7 +24,7 @@ O `arquiva_email_gui.py` é uma ferramenta especializada para organização auto
 3. **Processamento**:
    - O programa processará automaticamente todos os arquivos na pasta selecionada
    - Os arquivos serão movidos para subpastas no formato `Ano/Ano-Mês` baseado em suas datas
-   - Uma janela de resumo será exibida ao final do processamento
+   - Uma janela de resumo com contagem de arquivos processados e erros, e um contador regressivo para auto-fechamento, será exibida ao final.
 
 4. **Verificação de Resultados**:
    - Após a conclusão, verifique a estrutura de pastas criada
@@ -41,13 +41,13 @@ O `arquiva_email_gui.py` é uma ferramenta especializada para organização auto
 
 #### Para arquivos `.eml`:
 1. Tenta extrair o cabeçalho `Date` do email
-2. Utiliza múltiplos formatos de data para análise:
-   - Formato RFC 5322 padrão com offset de timezone
-   - Formatos alternativos com e sem dia da semana
-3. Em caso de falha na extração, utiliza a data atual como fallback
+2. Prioriza a análise da data usando `email.utils.parsedate_to_datetime`, que é robusta para diversos formatos e fusos horários. Datas com fuso horário são convertidas para o fuso horário local e depois tornadas "naive" (sem informação de fuso).
+3. Se a análise inicial falhar, tenta uma lista de formatos de data comuns (`strptime`), após limpar a string de data de informações de fuso horário entre parênteses (ex: `(UTC)`) ou sufixos como `UTC`/`GMT`.
+4. Em caso de falha em todas as tentativas de extração e análise da data, utiliza a data e hora atuais como fallback para determinar a pasta de arquivamento.
 
 #### Para outros arquivos:
 - Utiliza a data de modificação do arquivo obtida via `os.path.getmtime()`
+- Se houver erro ao obter a data de modificação, um erro é registrado no log e o arquivo não é movido.
 
 ### Tratamento de Nomes de Arquivo
 
@@ -55,20 +55,28 @@ O `arquiva_email_gui.py` é uma ferramenta especializada para organização auto
    - Remove o prefixo `"msg "` (comum em emails exportados)
    - Substitui caracteres inválidos (`< > : " / \ | ? *`) por underscores
    - Remove caracteres de controle (ASCII 0-31)
+   - Remove espaços em branco no início ou fim do nome.
    - Normaliza números no início do nome para remover zeros à esquerda
+   - Se o nome do arquivo ficar vazio após a sanitização, utiliza "arquivo_renomeado" como fallback.
 
 2. **Truncamento**:
-   - Limita o tamanho do nome para evitar exceder o limite de 255 caracteres
+   - Garante que o caminho completo do arquivo de destino (pasta + nome do arquivo) não exceda um limite seguro (aproximadamente 249 caracteres, derivado de `MAX_PATH_LENGTH = 259` e `SAFE_FILENAME_MARGIN = 10`).
    - Preserva a extensão original do arquivo
+   - O truncamento é feito na parte do nome do arquivo, considerando o comprimento do caminho da pasta de destino e da extensão.
+   - Utiliza codificação UTF-8 para calcular os comprimentos e tenta evitar quebrar caracteres multibyte no meio.
 
 3. **Resolução de Conflitos**:
-   - Adiciona contadores incrementais (`_1`, `_2`, etc.) para nomes duplicados
-   - Em casos extremos, utiliza timestamp com precisão de microssegundos
-   - Implementa verificação recursiva após cada tentativa de resolução
+   - Se um arquivo com o mesmo nome já existir no destino:
+     a. Tenta adicionar um sufixo numérico incremental (ex: `_1`, `_2`, ..., até `_100`).
+     b. Se o nome com sufixo numérico ainda for muito longo (excedendo o limite de caminho), ou se o limite de tentativas com contador for atingido:
+        i. Pega o nome do arquivo original (antes de adicionar o contador), anexa um timestamp detalhado (com microssegundos).
+        ii. Trunca este novo nome (com timestamp) se necessário para caber no limite de caminho.
+        iii. Se mesmo após isso houver colisão (extremamente raro), o arquivo não é movido e um erro é logado.
+   - O objetivo é sempre encontrar um nome único que respeite os limites de comprimento do caminho.
 
 ### Sistema de Logging
 
-- **Nível**: Configurado para registrar apenas erros (nível `ERROR`)
+- **Nível**: Configurado para registrar apenas mensagens de nível `ERROR`.
 - **Localização**: Cria pasta "ERROS" na raiz selecionada
 - **Formato**: Arquivos de log com timestamp único (`archive_failures_YYYYMMDDHHMMSS.log`)
 - **Conteúdo**: Detalhes específicos sobre cada erro ocorrido durante o processamento
@@ -78,7 +86,7 @@ O `arquiva_email_gui.py` é uma ferramenta especializada para organização auto
 - **Tecnologia**: Implementada com `tkinter`
 - **Componentes**:
   - Diálogo de seleção de pasta
-  - Mensagens informativas no início e fim do processo
+  - Mensagens informativas (`messagebox`) no início e para confirmação da pasta selecionada.
   - Janela de resumo com auto-fechamento ao final do processamento
   - Contadores de arquivos processados e erros encontrados
 
@@ -100,14 +108,13 @@ Prepara emails exportados para importação em novo sistema, mantendo a organiza
 
 - **Processamento de Subpastas**: O programa processa apenas arquivos no nível raiz da pasta selecionada
 - **Movimentação vs. Cópia**: Utiliza `shutil.move()`, que remove o arquivo original da pasta de origem
-- **Limites de Sistema de Arquivos**: Restrito ao limite de aproximadamente 255 caracteres para caminhos completos
+- **Limites de Sistema de Arquivos**: O programa tenta ativamente evitar caminhos completos que excedam aproximadamente 249 caracteres (no Windows). Nomes de arquivo podem ser truncados para respeitar este limite.
 - **Dependência de Formatos de Data**: A precisão da organização depende dos formatos de data nos cabeçalhos dos emails
 
 ## Requisitos Técnicos
 
-- Python 3.6 ou superior
-- Bibliotecas padrão: `os`, `shutil`, `email`, `logging`, `re`, `datetime`, `tkinter`
-- Não requer instalação de pacotes externos
+- **Sistema Operacional**: O executável (`.exe`) é projetado para rodar em sistemas Windows.
+- **Dependências**: Nenhuma instalação adicional é necessária para executar o arquivo `.exe`, pois todas as dependências (como Python e bibliotecas necessárias) estão empacotadas nele.
 
 ## Dicas de Uso
 

@@ -3,9 +3,7 @@ import logging
 import re
 from datetime import datetime
 from pathlib import Path
-# Set não está sendo usado, mas pode ser útil no futuro. Removido por enquanto.
-from typing import List, Tuple, Optional, Set
-from typing import List, Tuple, Optional
+from typing import List, Optional
 import tkinter as tk
 from tkinter import filedialog, messagebox
 
